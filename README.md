@@ -4,7 +4,7 @@ MCP-Server (Model Context Protocol) als **claude.ai Custom Connector** für das
 [Learnweb der Universität Münster](https://www.uni-muenster.de/LearnWeb/learnweb2)
 (Moodle-Installation der WWU).
 
-Liefert vier Read-only-Tools, mit denen Claude auf Kurse, Kursstruktur,
+Liefert fünf Read-only-Tools, mit denen Claude auf Kurse, Kursstruktur,
 Aktivitäten und die persönliche Timeline zugreifen kann — ohne dass der Nutzer
 manuell Inhalte copy-pasten muss.
 
@@ -16,9 +16,32 @@ manuell Inhalte copy-pasten muss.
 | `learnweb-get-course-overview` | Gibt Abschnitte + Aktivitäten eines einzelnen Kurses zurück. |
 | `learnweb-read-activity` | Liest eine Aktivität strukturiert aus (resource, url, page, forum, assign, quiz, ratingallocate, folder, workshop, lesson, choice, feedback). |
 | `learnweb-get-timeline` | Listet anstehende Aktivitäten (Deadlines, Quizze) kursübergreifend, sortiert nach Fälligkeit. |
+| `learnweb-search-courses` | Durchsucht den globalen Learnweb-Kurskatalog über `/course/search.php` und liefert paginierte Treffer. |
 
 Alle Tools sind **strikt read-only** — der Connector schreibt nichts ins Moodle.
 Dateien werden nie heruntergeladen, sondern nur als `download_url` zurückgegeben.
+
+## Tool: `learnweb-search-courses`
+
+Input:
+
+- `query` — Pflichtfeld, 2–200 Zeichen
+- `page` — optional, 0-basiert, Default `0`, max `20`
+- `limit` — optionales Trefferlimit für die Response, Default `25`, max `50`
+
+Output:
+
+- `results[]` mit `course_id`, `fullname`, optional `category`, optional `summary_snippet`, `url`, `enrol_url`
+- `page` — die angefragte 0-basierte Seite
+- `has_more` — einzig belastbares Pagination-Signal
+- `effective_perpage` — wie viele Treffer Moodle auf dieser Seite tatsächlich gerendert hat
+
+Limitations:
+
+- `limit` ist nur ein Upper Bound. Wenn Moodle serverseitig weniger Treffer pro Seite rendert, ist das kein Ende der Trefferliste.
+- Für Pagination darf **nur** `has_more` verwendet werden, niemals `results.length < limit`.
+- Das Tool hat ein in-memory Rate-Limit von 15 Aufrufen pro 30 Sekunden. Nach einem Railway-Redeploy startet dieser Zähler neu.
+- Das Output-Format enthält bewusst **kein** `shortname`, weil Klammer-Inhalte im Suchergebnis semantisch nicht stabil genug sind.
 
 ## Setup (lokal, stdio-Modus)
 
@@ -96,7 +119,7 @@ src/
 ├── config-utils.ts         Generische Parser
 ├── learnweb/
 │   ├── session.ts          Moodle-Login + Cookie-Management
-│   └── parsers/            13 Activity-Parser + Overview, Courses, Timeline
+│   └── parsers/            13 Activity-Parser + Overview, Courses, Timeline, Course Search
 ├── oauth/                  OAuth-2.0-Server (JWT, Redis/In-Memory-Store, OIDC)
 └── tools/
     ├── shared.ts           Tool-Result-Helfer, Annotations

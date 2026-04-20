@@ -1,11 +1,12 @@
 /**
  * MCP-Tools für Learnweb/Moodle — read-only.
  *
- * Vier Tools:
+ * Fünf Tools:
  *   1. learnweb-get-courses          → alle Kurse des Users
  *   2. learnweb-get-course-overview  → Struktur eines Kurses
  *   3. learnweb-read-activity        → strukturierter Inhalt einer Aktivität
  *   4. learnweb-get-timeline         → anstehende Aktivitäten (Upcoming-View)
+ *   5. learnweb-search-courses       → globale Kurssuche über /course/search.php
  *
  * Sicherheitsgrenze:
  *   Die Tools werden ausschliesslich registriert, wenn
@@ -15,6 +16,7 @@
  *   globalen HTTP-Endpoint mounten würde, würden die Tools dort NICHT registriert.
  */
 
+import * as cheerio from "cheerio";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
@@ -43,6 +45,7 @@ import { parseWorkshop } from "../learnweb/parsers/workshop";
 import { parseLesson } from "../learnweb/parsers/lesson";
 import { parseChoice } from "../learnweb/parsers/choice";
 import { parseFeedback } from "../learnweb/parsers/feedback";
+import { parseCourseSearch } from "../learnweb/parsers/courseSearch";
 import {
   ok,
   READ_ONLY_TOOL_ANNOTATIONS,
@@ -54,6 +57,75 @@ import {
 const MODTYPE_RE = /^[a-z_]+$/;
 const MAX_LIMIT = 25;
 const DEFAULT_LIMIT = 10;
+const SEARCH_DEFAULT_LIMIT = 25;
+const SEARCH_MAX_LIMIT = 50;
+const SEARCH_MAX_PAGE = 20;
+const SEARCH_RATE_LIMIT_MAX = 15;
+const SEARCH_RATE_LIMIT_WINDOW_MS = 30_000;
+const searchCallTimestamps: number[] = [];
+
+type SearchRateLimitResult =
+  | { ok: true }
+  | { ok: false; retryAfterSeconds: number };
+
+type SearchHtmlAnalysis = {
+  hasRegionMain: boolean;
+  hasNoResultsMarker: boolean;
+  isValidEmptyState: boolean;
+};
+
+function buildCourseSearchPath(query: string, page: number, limit: number): string {
+  const params = new URLSearchParams({
+    search: query,
+    perpage: String(limit),
+  });
+  if (page > 0) {
+    params.set("page", String(page));
+  }
+  return `/course/search.php?${params.toString()}`;
+}
+
+function checkSearchRateLimit(now = Date.now()): SearchRateLimitResult {
+  while (
+    searchCallTimestamps.length > 0 &&
+    now - searchCallTimestamps[0] >= SEARCH_RATE_LIMIT_WINDOW_MS
+  ) {
+    searchCallTimestamps.shift();
+  }
+
+  if (searchCallTimestamps.length >= SEARCH_RATE_LIMIT_MAX) {
+    const retryAfterSeconds = Math.max(
+      1,
+      Math.ceil(
+        (SEARCH_RATE_LIMIT_WINDOW_MS - (now - searchCallTimestamps[0])) / 1000
+      )
+    );
+    return { ok: false, retryAfterSeconds };
+  }
+
+  searchCallTimestamps.push(now);
+  return { ok: true };
+}
+
+function resetSearchRateLimitForTests(): void {
+  searchCallTimestamps.length = 0;
+}
+
+function analyzeCourseSearchHtml(html: string): SearchHtmlAnalysis {
+  const $ = cheerio.load(html);
+  const regionMain = $("#region-main").first();
+  const regionMainText = regionMain.text();
+  const hasRegionMain = regionMain.length > 0;
+  const hasNoResultsMarker =
+    /(Keine\s+Kurse.*gefunden|No\s+courses?.*found|Nothing\s+to\s+display)/is
+      .test(regionMainText);
+
+  return {
+    hasRegionMain,
+    hasNoResultsMarker,
+    isValidEmptyState: hasRegionMain && hasNoResultsMarker,
+  };
+}
 
 /**
  * Prüft, ob die Learnweb-Tools in diesem Server-Kontext registriert werden dürfen.
@@ -222,6 +294,96 @@ export function registerLearnwebTools(server: McpServer, scope?: WorkspaceScope)
       });
     }
   );
+
+  // ------------------------------------------------------------------
+  // Tool 5: learnweb-search-courses
+  // ------------------------------------------------------------------
+  registerTool(
+    "learnweb-search-courses",
+    {
+      title: "Learnweb: Search Courses",
+      description:
+        "Search the global Learnweb course catalogue via /course/search.php. " +
+        "`limit` is only an upper bound; paginate exclusively via `has_more`. " +
+        "`effective_perpage` reports how many results Moodle rendered on that page.",
+      inputSchema: {
+        query: z
+          .string()
+          .min(2)
+          .max(200)
+          .describe("Search term for the global Learnweb course catalogue."),
+        page: z
+          .number()
+          .int()
+          .min(0)
+          .max(SEARCH_MAX_PAGE)
+          .optional()
+          .describe(`Optional result page. Default 0, max ${SEARCH_MAX_PAGE}.`),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(SEARCH_MAX_LIMIT)
+          .optional()
+          .describe(
+            `Optional upper bound for returned results. Default ${SEARCH_DEFAULT_LIMIT}, max ${SEARCH_MAX_LIMIT}.`
+          ),
+      } as ToolInputSchema,
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async (args: { query: string; page?: number; limit?: number }) => {
+      return wrapHandler(async () => {
+        const rateLimit = checkSearchRateLimit();
+        if (!rateLimit.ok) {
+          return {
+            error: true,
+            code: "rate_limited",
+            message: `Search rate limit exceeded. Retry in ${rateLimit.retryAfterSeconds} seconds.`,
+            retryAfterSeconds: rateLimit.retryAfterSeconds,
+          };
+        }
+
+        const session = LearnwebSession.getInstance();
+        const page = args.page ?? 0;
+        const limit = args.limit ?? SEARCH_DEFAULT_LIMIT;
+        const resp = await session.get(buildCourseSearchPath(args.query, page, limit));
+
+        if (resp.status < 200 || resp.status >= 300) {
+          return {
+            error: true,
+            code: "course_search_unavailable",
+            message: "Could not load course search.",
+          };
+        }
+
+        const html = resp.data;
+        const analysis = analyzeCourseSearchHtml(html);
+        if (!analysis.hasRegionMain) {
+          return {
+            error: true,
+            code: "unexpected_html",
+            message: "Unexpected HTML structure in course search response.",
+          };
+        }
+
+        const parsed = parseCourseSearch(html, session.getBaseUrl(), page);
+        if (parsed.results.length === 0 && !analysis.isValidEmptyState) {
+          return {
+            error: true,
+            code: "unexpected_html",
+            message: "Unexpected HTML structure in course search response.",
+          };
+        }
+
+        return {
+          results: parsed.results.slice(0, limit),
+          page: parsed.page,
+          has_more: parsed.has_more,
+          effective_perpage: parsed.results.length,
+        };
+      });
+    }
+  );
 }
 
 /**
@@ -298,4 +460,11 @@ async function wrapHandler<T>(fn: () => Promise<T>) {
 }
 
 /** Exportiert für Tests. */
-export const _testing = { shouldRegister, dispatchActivity };
+export const _testing = {
+  shouldRegister,
+  dispatchActivity,
+  buildCourseSearchPath,
+  checkSearchRateLimit,
+  resetSearchRateLimitForTests,
+  analyzeCourseSearchHtml,
+};

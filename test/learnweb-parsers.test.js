@@ -20,6 +20,7 @@ const FIXTURES = path.join(ROOT, "test/fixtures/learnweb");
 // Die Parser sind als CommonJS-Module nach dem TS-Build verfügbar.
 // Wir gehen über dist/ um keine ts-node-Dependency einzuziehen.
 const { parseCourses } = require(path.join(ROOT, "dist/learnweb/parsers/courses"));
+const { parseCourseSearch } = require(path.join(ROOT, "dist/learnweb/parsers/courseSearch"));
 const { parseCourseOverview } = require(path.join(ROOT, "dist/learnweb/parsers/overview"));
 const { parseResource } = require(path.join(ROOT, "dist/learnweb/parsers/resource"));
 const { parseUrl } = require(path.join(ROOT, "dist/learnweb/parsers/url"));
@@ -88,6 +89,49 @@ test("parseCourses: dedupe + title fallback", () => {
 
   // URL soll absolut sein, auch für relative hrefs.
   assert.ok(byId[101].url.startsWith(BASE_URL));
+});
+
+// ------------------------------------------------------------------
+// parseCourseSearch
+// ------------------------------------------------------------------
+test("parseCourseSearch: extrahiert Treffer, dedupliziert und erkennt has_more", () => {
+  const html = readFixture("course-search.html");
+  const page = parseCourseSearch(html, BASE_URL, 0);
+
+  assert.equal(page.page, 0);
+  assert.equal(page.has_more, true);
+  assert.equal(page.results.length, 3);
+
+  const byId = Object.fromEntries(page.results.map((course) => [course.course_id, course]));
+  assert.equal(byId[92286].fullname, "Einführung in die Wirtschaftsinformatik SoSe 2099");
+  assert.equal(byId[92286].category, "Institut für Wirtschaftsinformatik");
+  assert.ok(byId[92286].url.startsWith(BASE_URL));
+  assert.ok(byId[92286].enrol_url.endsWith("/enrol/index.php?id=92286"));
+  assert.ok(byId[92286].summary_snippet.endsWith("…"));
+  assert.ok(byId[92286].summary_snippet.length <= 301);
+  assert.ok(!byId[92286].summary_snippet.includes(" …"));
+  assert.equal("shortname" in byId[92286], false);
+
+  assert.equal(byId[87647].summary_snippet, "Kompakte Kursbeschreibung für einen echten Treffer.");
+  assert.equal(byId[90762].category, undefined);
+});
+
+test("parseCourseSearch: letzte Seite setzt has_more auf false", () => {
+  const html = readFixture("course-search-last-page.html");
+  const page = parseCourseSearch(html, BASE_URL, 1);
+
+  assert.equal(page.page, 1);
+  assert.equal(page.has_more, false);
+  assert.equal(page.results.length, 2);
+});
+
+test("parseCourseSearch: No-Results-Seite liefert leere Ergebnisse", () => {
+  const html = readFixture("course-search-no-results.html");
+  const page = parseCourseSearch(html, BASE_URL, 0);
+
+  assert.equal(page.page, 0);
+  assert.equal(page.has_more, false);
+  assert.equal(page.results.length, 0);
 });
 
 // ------------------------------------------------------------------
