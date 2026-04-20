@@ -43,6 +43,12 @@ raus.
 - Wenn Push oder Deployment noch ausstehen, im Abschluss klar sagen, was schon
   erledigt ist, was als Nächstes dran ist und ob dafür noch eine Bestätigung
   des Nutzers nötig ist.
+- Wenn der Nutzer ausdrücklich sagt „live nehmen", „deployen", „go live" oder
+  sinngemäß die produktive Auslieferung verlangt, gilt das in diesem Repo als
+  Freigabe, den üblichen Abschlussweg ohne erneute Rückfrage durchzuziehen:
+  Re-Check, GitHub-Push und Railway-Deployment bzw. Deployment-Verifikation.
+- In diesem Fall den Push-Inhalt trotzdem kurz transparent machen, aber nicht
+  auf eine zweite Bestätigung warten.
 
 ## Sicherheitsgrenzen
 
@@ -61,6 +67,8 @@ raus.
 - Vor Änderungen an `railway.toml`, Env-Vars oder Launchd-Plists **immer
   fragen**, bevor Aktionen ausgeführt werden.
 - Vor `git push` den Commit-Inhalt erklären und bestätigen lassen.
+- Ausnahme: Wenn der Nutzer die produktive Live-Schaltung selbst ausdrücklich
+  verlangt, zählt das als Bestätigung für den zugehörigen `git push`.
 
 ## Offene Punkte (Stand April 2026)
 
