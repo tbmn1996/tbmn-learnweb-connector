@@ -1,0 +1,301 @@
+/**
+ * MCP-Tools für Learnweb/Moodle — read-only.
+ *
+ * Vier Tools:
+ *   1. learnweb-get-courses          → alle Kurse des Users
+ *   2. learnweb-get-course-overview  → Struktur eines Kurses
+ *   3. learnweb-read-activity        → strukturierter Inhalt einer Aktivität
+ *   4. learnweb-get-timeline         → anstehende Aktivitäten (Upcoming-View)
+ *
+ * Sicherheitsgrenze:
+ *   Die Tools werden ausschliesslich registriert, wenn
+ *     (a) LEARNWEB_USERNAME und LEARNWEB_PASSWORD gesetzt sind, UND
+ *     (b) der Transport `stdio` ist ODER ein Scope (z.B. "learnweb") angegeben ist.
+ *   Defensive Programmierung: Selbst wenn jemand versehentlich einen ungeschützten
+ *   globalen HTTP-Endpoint mounten würde, würden die Tools dort NICHT registriert.
+ */
+
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import {
+  LEARNWEB_PASSWORD,
+  LEARNWEB_USERNAME,
+  MCP_TRANSPORT,
+} from "../config";
+import {
+  LearnwebAuthError,
+  LearnwebNotConfiguredError,
+  LearnwebSession,
+} from "../learnweb/session";
+import { parseCourses } from "../learnweb/parsers/courses";
+import { parseCourseOverview } from "../learnweb/parsers/overview";
+import { parseResource } from "../learnweb/parsers/resource";
+import { parseUrl } from "../learnweb/parsers/url";
+import { parsePage } from "../learnweb/parsers/page";
+import { parseFallback } from "../learnweb/parsers/fallback";
+import { parseForum } from "../learnweb/parsers/forum";
+import { parseAssign } from "../learnweb/parsers/assign";
+import { parseQuiz } from "../learnweb/parsers/quiz";
+import { parseRatingAllocate } from "../learnweb/parsers/ratingallocate";
+import { parseTimeline } from "../learnweb/parsers/timeline";
+import { parseFolder } from "../learnweb/parsers/folder";
+import { parseWorkshop } from "../learnweb/parsers/workshop";
+import { parseLesson } from "../learnweb/parsers/lesson";
+import { parseChoice } from "../learnweb/parsers/choice";
+import { parseFeedback } from "../learnweb/parsers/feedback";
+import {
+  ok,
+  READ_ONLY_TOOL_ANNOTATIONS,
+  ToolConfig,
+  ToolInputSchema,
+  WorkspaceScope,
+} from "./shared";
+
+const MODTYPE_RE = /^[a-z_]+$/;
+const MAX_LIMIT = 25;
+const DEFAULT_LIMIT = 10;
+
+/**
+ * Prüft, ob die Learnweb-Tools in diesem Server-Kontext registriert werden dürfen.
+ * Siehe Dateikopf für die Begründung der Regel.
+ */
+function shouldRegister(scope: WorkspaceScope): boolean {
+  if (!LEARNWEB_USERNAME || !LEARNWEB_PASSWORD) return false;
+  if (MCP_TRANSPORT === "stdio") return true;
+  if (scope !== undefined) return true;
+  return false;
+}
+
+/**
+ * Registriert die Learnweb-Tools, falls die Sicherheitsregel erfüllt ist.
+ * Wird immer aufgerufen, gibt aber bei falscher Konfiguration einfach still
+ * nichts zurück.
+ */
+export function registerLearnwebTools(server: McpServer, scope?: WorkspaceScope) {
+  if (!shouldRegister(scope)) return;
+
+  const registerTool = server.registerTool.bind(server) as (
+    name: string,
+    config: ToolConfig,
+    handler: (args: any) => Promise<unknown>
+  ) => void;
+
+  // ------------------------------------------------------------------
+  // Tool 1: learnweb-get-courses
+  // ------------------------------------------------------------------
+  registerTool(
+    "learnweb-get-courses",
+    {
+      title: "Learnweb: List Courses",
+      description:
+        "List all courses visible on the Learnweb dashboard for the configured user.",
+      inputSchema: {} as ToolInputSchema,
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async () => {
+      return wrapHandler(async () => {
+        const session = LearnwebSession.getInstance();
+        const resp = await session.get("/my/index.php");
+        if (resp.status < 200 || resp.status >= 300) {
+          return { error: true, message: "Could not load dashboard." };
+        }
+        const courses = parseCourses(resp.data, session.getBaseUrl());
+        return { courses };
+      });
+    }
+  );
+
+  // ------------------------------------------------------------------
+  // Tool 2: learnweb-get-course-overview
+  // ------------------------------------------------------------------
+  registerTool(
+    "learnweb-get-course-overview",
+    {
+      title: "Learnweb: Course Overview",
+      description:
+        "Return the section/activity structure of a single Learnweb course.",
+      inputSchema: {
+        course_id: z
+          .number()
+          .int()
+          .positive()
+          .describe("Numeric Moodle course id (id param from /course/view.php)."),
+      } as ToolInputSchema,
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async ({ course_id }: { course_id: number }) => {
+      return wrapHandler(async () => {
+        const session = LearnwebSession.getInstance();
+        const resp = await session.get(`/course/view.php?id=${course_id}`);
+        if (resp.status < 200 || resp.status >= 300) {
+          return {
+            error: true,
+            message: `Could not load course ${course_id}.`,
+          };
+        }
+        return parseCourseOverview(resp.data, course_id, session.getBaseUrl());
+      });
+    }
+  );
+
+  // ------------------------------------------------------------------
+  // Tool 3: learnweb-read-activity
+  // ------------------------------------------------------------------
+  registerTool(
+    "learnweb-read-activity",
+    {
+      title: "Learnweb: Read Activity",
+      description:
+        "Read a single Moodle activity in a structured form. Files are never downloaded; resources return a download_url only.",
+      inputSchema: {
+        cmid: z
+          .number()
+          .int()
+          .positive()
+          .describe("Moodle course module id (data-id / cmid)."),
+        modtype: z
+          .string()
+          .regex(MODTYPE_RE, "modtype must be lowercase letters/underscores.")
+          .describe(
+            "Lowercase Moodle modtype, e.g. 'resource', 'url', 'page', 'forum', 'assign', 'quiz', " +
+            "'ratingallocate', 'folder', 'workshop', 'lesson', 'choice', 'feedback'."
+          ),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(MAX_LIMIT)
+          .optional()
+          .describe(`Optional. Forum discussion page size. Default ${DEFAULT_LIMIT}, max ${MAX_LIMIT}.`),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("Optional. Forum discussion offset (pagination)."),
+      } as ToolInputSchema,
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async (args: {
+      cmid: number;
+      modtype: string;
+      limit?: number;
+      offset?: number;
+    }) => {
+      return wrapHandler(async () => {
+        const session = LearnwebSession.getInstance();
+        return dispatchActivity(session, args);
+      });
+    }
+  );
+
+  // ------------------------------------------------------------------
+  // Tool 4: learnweb-get-timeline
+  // ------------------------------------------------------------------
+  registerTool(
+    "learnweb-get-timeline",
+    {
+      title: "Learnweb: Upcoming Timeline",
+      description:
+        "List upcoming activities (quizzes, assignments, events) across all courses, ordered by due date. " +
+        "Parses the Moodle calendar upcoming view (/calendar/view.php?view=upcoming). " +
+        "Use this tool to answer questions like 'what is due this week?' or 'are there any open quizzes?'",
+      inputSchema: {
+        window_days: z
+          .number()
+          .int()
+          .min(1)
+          .max(90)
+          .optional()
+          .describe("Limit to events within the next N days. Default 30, max 90."),
+        modtypes: z
+          .array(z.string().regex(MODTYPE_RE))
+          .optional()
+          .describe("Optional filter by modtype, e.g. ['quiz', 'assign']."),
+      } as ToolInputSchema,
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async (args: { window_days?: number; modtypes?: string[] }) => {
+      return wrapHandler(async () => {
+        const session = LearnwebSession.getInstance();
+        return parseTimeline(session, args);
+      });
+    }
+  );
+}
+
+/**
+ * Führt den Activity-Parser passend zum modtype aus. Unbekannte modtypes
+ * landen im fallback-Parser (raw_text + parser_degraded:true).
+ */
+async function dispatchActivity(
+  session: LearnwebSession,
+  args: { cmid: number; modtype: string; limit?: number; offset?: number }
+) {
+  const { cmid, modtype, limit, offset } = args;
+  switch (modtype) {
+    case "resource":
+      return { modtype, ...(await parseResource(session, cmid)) };
+    case "url":
+      return { modtype, ...(await parseUrl(session, cmid)) };
+    case "page":
+      return { modtype, ...(await parsePage(session, cmid)) };
+    case "forum":
+      return { modtype, ...(await parseForum(session, cmid, { limit, offset })) };
+    case "assign":
+      return { modtype, ...(await parseAssign(session, cmid)) };
+    case "quiz":
+      return { modtype, ...(await parseQuiz(session, cmid)) };
+    case "ratingallocate":
+      return { modtype, ...(await parseRatingAllocate(session, cmid)) };
+    case "folder":
+      return { modtype, ...(await parseFolder(session, cmid)) };
+    case "workshop":
+      return { modtype, ...(await parseWorkshop(session, cmid)) };
+    case "lesson":
+      return { modtype, ...(await parseLesson(session, cmid)) };
+    case "choice":
+      return { modtype, ...(await parseChoice(session, cmid)) };
+    case "feedback":
+      return { modtype, ...(await parseFeedback(session, cmid)) };
+    default:
+      return { modtype, ...(await parseFallback(session, cmid, modtype)) };
+  }
+}
+
+/**
+ * Generischer Try/Catch-Wrapper für alle Tool-Handler. Liefert auf Fehler
+ * eine isError:true-Response mit generischer Message — NIEMALS Credentials
+ * oder Session-Cookies im Output.
+ */
+async function wrapHandler<T>(fn: () => Promise<T>) {
+  try {
+    const value = await fn();
+    return ok(value as unknown);
+  } catch (err) {
+    const code =
+      err instanceof LearnwebNotConfiguredError
+        ? "learnweb_not_configured"
+        : err instanceof LearnwebAuthError
+          ? "learnweb_auth_error"
+          : "learnweb_error";
+    // Bewusst generische Message, damit keine Cookie-Details o.ä. rausfliessen.
+    const message =
+      err instanceof LearnwebNotConfiguredError
+        ? "Learnweb is not configured on this server."
+        : err instanceof LearnwebAuthError
+          ? "Learnweb authentication failed."
+          : "Learnweb request failed.";
+    return ok(
+      { error: true, code, message },
+      {
+        text: JSON.stringify({ error: true, code, message }),
+        structuredContent: { error: true, code, message },
+        isError: true,
+      }
+    );
+  }
+}
+
+/** Exportiert für Tests. */
+export const _testing = { shouldRegister, dispatchActivity };

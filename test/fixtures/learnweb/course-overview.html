@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<!--
+  Synthetische Fixture: Moodle-Kursseite (/course/view.php?id=101)
+  Bildet die DOM-Struktur ab, die parseCourseOverview erwartet:
+
+    li.course-section[data-sectionname]
+      ul[data-for="cmlist"]
+        li[data-for="cmitem"][data-id][class~="modtype_*"]
+          div[data-activityname]
+          a.aalink|a.stretched-link
+
+  Testet:
+    - mehrere Sections
+    - mehrere Modtypes (resource, url, forum, page, label, assign)
+    - Label wird geskipped
+    - aalink/stretched-link Fallback-Reihenfolge
+    - Fallback auf /mod/{modtype}/view.php?id={cmid} wenn kein Link
+    - Truncation langer Namen (>200 Zeichen)
+-->
+<html lang="de">
+<head><title>Analysis: Analysis für Wirtschaftswissenschaftler</title></head>
+<body>
+<h1>Analysis für Wirtschaftswissenschaftler</h1>
+
+<section id="region-main">
+
+  <li class="section course-section" data-sectionname="Allgemeine Informationen">
+    <h3>Allgemeine Informationen</h3>
+    <ul data-for="cmlist">
+
+      <li data-for="cmitem" data-id="1001" class="activity resource modtype_resource">
+        <div data-activityname="Vorlesungsskript Kapitel 1">
+          <a class="aalink" href="/mod/resource/view.php?id=1001">Öffnen</a>
+        </div>
+      </li>
+
+      <li data-for="cmitem" data-id="1002" class="activity url modtype_url">
+        <div data-activityname="Lehrplan (extern)">
+          <a class="stretched-link" href="/mod/url/view.php?id=1002">Open</a>
+        </div>
+      </li>
+
+      <li data-for="cmitem" data-id="1003" class="activity label modtype_label">
+        <!-- Labels werden vom Parser geskipped (kein eigenes View-Ziel). -->
+        <div>Bitte zuerst das Skript lesen.</div>
+      </li>
+    </ul>
+  </li>
+
+  <li class="section course-section" data-sectionname="Forum &amp; Diskussion">
+    <h3>Forum</h3>
+    <ul data-for="cmlist">
+      <li data-for="cmitem" data-id="2001" class="activity forum modtype_forum">
+        <div data-activityname="Ankündigungen">
+          <!-- Weder aalink noch stretched-link — parseCourseOverview muss
+               auf /mod/forum/view.php?id=2001 zurückfallen. -->
+        </div>
+      </li>
+
+      <li data-for="cmitem" data-id="2002" class="activity page modtype_page">
+        <div data-activityname="Sprechstundenzeiten">
+          <a class="aalink" href="https://learnweb.example.com/mod/page/view.php?id=2002">
+            Ansehen
+          </a>
+        </div>
+      </li>
+    </ul>
+  </li>
+
+  <li class="section course-section" data-sectionname="Übungen">
+    <ul data-for="cmlist">
+      <li data-for="cmitem" data-id="3001" class="activity assign modtype_assign">
+        <div data-activityname="Hausaufgabe 1 — Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit.">
+          <a class="aalink" href="/mod/assign/view.php?id=3001">Ansehen</a>
+        </div>
+      </li>
+    </ul>
+  </li>
+
+  <!-- Section ohne cmlist — muss übersprungen werden. -->
+  <li class="section course-section" data-sectionname="Leer">
+    <h3>Leer</h3>
+  </li>
+
+</section>
+</body>
+</html>

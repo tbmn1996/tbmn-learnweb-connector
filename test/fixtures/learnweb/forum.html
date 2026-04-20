@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<!--
+  Synthetische Fixture: Moodle-Forum-Aktivität (/mod/forum/view.php?id=4001).
+  Struktur orientiert an Moodle 4.x Discussion List:
+    - div.activity-description (intro)
+    - table.discussion-list
+      - tr[data-region="discussion-list-item"][data-discussionid]
+        - th.topic > a          → Titel + URL der Diskussion
+        - td.author             → Autor (Starter)
+        - td.text-start         → Last-post
+        - td (numerische)       → Replies-Count
+-->
+<html lang="de">
+<head><title>Diskussionsforum</title></head>
+<body>
+<h1>Diskussionsforum</h1>
+
+<div class="activity-description" id="intro">
+  <p>In diesem Forum besprechen wir organisatorische Fragen rund um die Vorlesung.</p>
+</div>
+
+<table class="table discussion-list generaltable">
+  <thead>
+    <tr>
+      <th class="topic">Discussion</th>
+      <th class="author px-3">Started by</th>
+      <th class="lastpost px-3">Last post</th>
+      <th>Replies</th>
+    </tr>
+  </thead>
+  <tbody>
+
+    <tr class="discussion"
+        data-region="discussion-list-item"
+        data-discussionid="9001"
+        data-forumid="4001">
+      <td class="p-0 text-center">⭐</td>
+      <th scope="row" class="topic p-0 align-middle">
+        <div class="p-3">
+          <a href="/mod/forum/discuss.php?d=9001" title="Termin Klausurbesprechung">
+            Termin Klausurbesprechung
+          </a>
+        </div>
+      </th>
+      <td class="author align-middle px-3">
+        <div class="author-info align-middle">
+          <div class="mb-1 line-height-3 text-truncate">Author A</div>
+          <div class="line-height-3">
+            <time data-timestamp="1776073165">13 Apr 2026</time>
+          </div>
+        </div>
+      </td>
+      <td class="text-start align-middle px-3">
+        <div class="author-info align-middle">
+          <div class="mb-1 line-height-3 text-truncate">Author B</div>
+          <div class="line-height-3">
+            <a href="/mod/forum/discuss.php?d=9001&parent=1234">
+              <time data-timestamp="1776144100">14 Apr 2026</time>
+            </a>
+          </div>
+        </div>
+      </td>
+      <td class="p-0 text-center px-2"><span>3</span></td>
+    </tr>
+
+    <tr class="discussion"
+        data-region="discussion-list-item"
+        data-discussionid="9002"
+        data-forumid="4001">
+      <td class="p-0 text-center"></td>
+      <th scope="row" class="topic p-0 align-middle">
+        <div class="p-3">
+          <a href="https://learnweb.example.com/mod/forum/discuss.php?d=9002"
+             title="Frage zu Aufgabe 3">
+            Frage zu Aufgabe 3
+          </a>
+        </div>
+      </th>
+      <td class="author align-middle px-3">
+        <div class="author-info align-middle">
+          <div class="mb-1 line-height-3 text-truncate">Author C</div>
+          <div class="line-height-3">
+            <time data-timestamp="1775900000">11 Apr 2026</time>
+          </div>
+        </div>
+      </td>
+      <td class="text-start align-middle px-3">
+        <div class="author-info align-middle">
+          <div class="mb-1 line-height-3 text-truncate">Author A</div>
+        </div>
+      </td>
+      <td class="p-0 text-center px-2"><span>0</span></td>
+    </tr>
+
+  </tbody>
+</table>
+
+</body>
+</html>

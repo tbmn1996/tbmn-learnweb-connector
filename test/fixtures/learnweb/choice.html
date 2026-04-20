@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<!--
+  Synthetische Fixture: Moodle-Abstimmung (/mod/choice/view.php?id=9004).
+  Zeigt eine Abstimmung mit 3 Optionen.
+-->
+<html lang="en">
+<head><title>Terminfindung Klausur</title></head>
+<body>
+<h1>Terminfindung Klausur</h1>
+
+<div class="activity-header">
+  <div class="activity-dates">
+    <div><strong>Opens:</strong> Monday, 1 April 2026, 8:00 AM</div>
+    <div><strong>Closes:</strong> Friday, 10 April 2026, 11:59 PM</div>
+  </div>
+</div>
+
+<div class="activity-description" id="intro">
+  <p>Bitte wählen Sie Ihren bevorzugten Klausurtermin.</p>
+</div>
+
+<div id="region-main">
+  <form class="choiceform" method="post">
+    <div class="option">
+      <input type="radio" name="answer" id="choice_1" value="1">
+      <label for="choice_1">
+        <span class="choicetext">Montag, 15. Juni 2026, 10:00 Uhr</span>
+      </label>
+    </div>
+    <div class="option">
+      <input type="radio" name="answer" id="choice_2" value="2">
+      <label for="choice_2">
+        <span class="choicetext">Dienstag, 16. Juni 2026, 14:00 Uhr</span>
+      </label>
+    </div>
+    <div class="option">
+      <input type="radio" name="answer" id="choice_3" value="3" checked>
+      <label for="choice_3">
+        <span class="choicetext">Mittwoch, 17. Juni 2026, 10:00 Uhr</span>
+      </label>
+    </div>
+    <button type="submit">Abstimmen</button>
+  </form>
+</div>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<!--
+  Synthetische Fixture: Moodle-ratingallocate (/mod/ratingallocate/view.php?id=7001).
+  Zwei Strukturen:
+    1) div.activity-header mit Opened/Closed
+    2) div.choicestatustable
+       - table.generaltable (choicesummarytable)
+         - Rows: td.c0 (Label) | td.c1 (Value)
+           Labels die wir mappen:
+             * Rating ends at           → deadline
+             * Time remaining           → time_remaining
+             * Estimated publication    → publication_date
+             * Your Rating              → choices[] aus ul/li
+             * Your Allocation          → allocation (Tag-Text)
+  Die Your-Rating-Liste dient als Proxy für die verfuegbaren Gruppen,
+  auch wenn der Parser keine max_size aus dieser View ableiten kann
+  (die gibt es nur in der Pre-Rating-View).
+-->
+<html lang="de">
+<head><title>Einteilung Übungsgruppen</title></head>
+<body>
+
+<div class="activity-header" data-for="page-activity-header">
+  <h1>Einteilung Übungsgruppen</h1>
+  <div class="activity-dates">
+    <div><strong>Opened:</strong> Monday, 13 April 2026, 10:00 AM</div>
+    <div><strong>Closed:</strong> Thursday, 16 April 2026, 12:00 PM</div>
+  </div>
+</div>
+
+<div class="activity-description" id="intro">
+  <p>Bitte tragen Sie Ihre Präferenzen für die Übungsgruppen ein.</p>
+</div>
+
+<div role="main">
+  <div class="box py-3 generalbox">
+    <div class="alert alert-success">The rating is over. You were allocated to 'W09 (Freitag, 14-16)'.</div>
+  </div>
+
+  <div class="choicestatustable">
+    <h3>Status</h3>
+    <div class="box py-3 choicesummarytable">
+      <table class="generaltable table table-hover">
+        <tbody>
+          <tr>
+            <td class="cell c0">Rating ends at</td>
+            <td class="cell c1 lastcol">Thursday, 16 April 2026, 12:00 PM</td>
+          </tr>
+          <tr>
+            <td class="cell c0">Time remaining</td>
+            <td class="cell c1 lastcol">The rating is over.</td>
+          </tr>
+          <tr>
+            <td class="cell c0">Estimated publication date</td>
+            <td class="cell c1 lastcol">Friday, 17 April 2026, 9:56 AM</td>
+          </tr>
+          <tr>
+            <td class="cell c0">Your Rating</td>
+            <td class="cell c1 lastcol">
+              <ul>
+                <li>W01 (Donnerstag, 10-12) (1)</li>
+                <li>W02 (Donnerstag, 14-16) (4 - Highly appreciated)</li>
+                <li>W03 (Donnerstag, 16-18) (0 - Exclude)</li>
+                <li>W09 (Freitag, 14-16) (4 - Highly appreciated)</li>
+              </ul>
+            </td>
+          </tr>
+          <tr class="lastrow">
+            <td class="cell c0">Your Allocation</td>
+            <td class="cell c1 lastcol">
+              <span class="allocation tag tag-success">W09 (Freitag, 14-16)</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<!--
+  Synthetische Fixture: Moodle-Assignment (/mod/assign/view.php?id=5001).
+  Abbildet die Moodle-4.x-Struktur für Assignment-Info:
+    - div.activity-header → enthaelt Due-Block
+    - div.activity-description (intro)
+    - div.submissionstatustable
+      - table.generaltable (submissionsummarytable)
+        - tr: th.c0 (Label) | td.c1 (Value)
+          Labels die wir mappen:
+            * Submission status   → submission_status
+            * Grading status      → grading_status
+            * Grade               → grade
+            * Time remaining      → time_remaining
+            * Last modified       → last_modified
+            * Due date            → (bereits aus activity-header)
+-->
+<html lang="de">
+<head><title>Hausaufgabe 1</title></head>
+<body>
+
+<div class="activity-header" data-for="page-activity-header">
+  <h1>Hausaufgabe 1</h1>
+  <div class="activity-dates">
+    <div><strong>Opens:</strong> Monday, 14 April 2026, 8:00 AM</div>
+    <div><strong>Due:</strong> Tuesday, 21 April 2026, 9:00 AM</div>
+  </div>
+</div>
+
+<div class="activity-description" id="intro">
+  <p>Laden Sie Ihre Lösung als PDF oder Präsentationsdatei hoch.</p>
+  <p>Der Einreichungszeitraum endet am 21.04.2026.</p>
+</div>
+
+<div class="submissionstatustable">
+  <h3>Submission status</h3>
+  <div class="box py-3 boxaligncenter submissionsummarytable">
+    <table class="generaltable table table-striped">
+      <tbody>
+        <tr>
+          <th class="cell c0" scope="row">Submission status</th>
+          <td class="cell c1 lastcol">Nothing has been submitted for this assignment</td>
+        </tr>
+        <tr>
+          <th class="cell c0" scope="row">Grading status</th>
+          <td class="submissionnotgraded cell c1 lastcol">Not graded</td>
+        </tr>
+        <tr>
+          <th class="cell c0" scope="row">Time remaining</th>
+          <td class="timeremaining cell c1 lastcol">3 days 9 hours remaining</td>
+        </tr>
+        <tr>
+          <th class="cell c0" scope="row">Last modified</th>
+          <td class="cell c1 lastcol">-</td>
+        </tr>
+        <tr>
+          <th class="cell c0" scope="row">Grade</th>
+          <td class="cell c1 lastcol">-</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+</body>
+</html>

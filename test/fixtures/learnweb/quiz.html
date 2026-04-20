@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<!--
+  Synthetische Fixture: Moodle-Quiz (/mod/quiz/view.php?id=6001).
+  Abbildet die Moodle-4.x-Struktur der Quiz-Infoseite (Vor-Attempt-View):
+    - div.activity-header    → Opens/Closes dates
+    - div.activity-description (intro) → Beschreibung
+    - div.quizinfo           → Grading method etc.
+    - div.quizattempt        → Status von bisherigen Attempts (kann leer sein)
+  WICHTIG: Quiz-*Inhalte* (Fragen) werden NICHT extrahiert — nur Metadaten.
+-->
+<html lang="de">
+<head><title>Eingangstest</title></head>
+<body>
+
+<div class="activity-header" data-for="page-activity-header">
+  <h1>Eingangstest</h1>
+  <div class="activity-dates">
+    <div><strong>Opens:</strong> Monday, 13 April 2026, 10:00 AM</div>
+    <div><strong>Closes:</strong> Saturday, 29 August 2026, 9:00 AM</div>
+  </div>
+</div>
+
+<div class="activity-description" id="intro">
+  <p>Kurzer Eingangstest zur Überprüfung der Voraussetzungen.</p>
+  <p>Es sind zwei Versuche erlaubt; die höhere Punktzahl zählt.</p>
+</div>
+
+<div role="main">
+  <div class="box py-3 quizinfo">
+    <p class="text-start">Grading method: Highest grade</p>
+    <p class="text-start">Attempts allowed: 2</p>
+  </div>
+  <div class="box py-3 quizattempt"></div>
+</div>
+
+</body>
+</html>

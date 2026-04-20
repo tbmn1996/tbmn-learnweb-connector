@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<!--
+  Synthetische Fixture: Moodle-Kalender-Upcoming/Monats-Ansicht.
+  Enthält 4 Events in 2 Kalender-Tagen:
+    - 2099-06-10: Quiz "Abgabe Analysis 1" (mod_quiz, open)
+    - 2099-06-10: Assignment "Übungszettel 1" (mod_assign, due)
+    - 2099-06-20: Quiz "Probeklausur LA" (mod_quiz, close)
+    - 2099-07-01: Page-Event "Klausurvorbereitung" (mod_page, course)
+  Nutzt das Calendar-Month-Markup (data-region="event-item").
+-->
+<html lang="en">
+<head><title>April 2099</title></head>
+<body>
+
+<div data-region="calendar" class="maincalendar">
+  <table>
+    <tbody>
+      <!-- Woche 1 -->
+      <tr data-region="month-view-week">
+        <td data-region="day" data-year="2099" data-month="6" data-day="10">
+          <div data-region="day-content">
+            <ul>
+              <li data-region="event-item"
+                  data-event-component="mod_quiz"
+                  data-event-eventtype="open"
+                  data-event-id="1001"
+                  data-eventtype-course="1">
+                <a data-action="view-event"
+                   data-event-id="1001"
+                   href="https://learnweb.example.com/mod/quiz/view.php?id=8001"
+                   title="Abgabe Analysis 1 beginnt">
+                  <span class="calendar-circle calendar_event_course">&nbsp;</span>
+                  <span class="eventname">Abgabe Analysis 1 beginnt</span>
+                </a>
+              </li>
+              <li data-region="event-item"
+                  data-event-component="mod_assign"
+                  data-event-eventtype="due"
+                  data-event-id="1002"
+                  data-eventtype-course="1">
+                <a data-action="view-event"
+                   data-event-id="1002"
+                   href="https://learnweb.example.com/mod/assign/view.php?id=8002"
+                   title="Übungszettel 1 fällig">
+                  <span class="calendar-circle calendar_event_course">&nbsp;</span>
+                  <span class="eventname">Übungszettel 1 fällig</span>
+                </a>
+              </li>
+            </ul>
+          </div>
+        </td>
+      </tr>
+
+      <!-- Woche 2 -->
+      <tr data-region="month-view-week">
+        <td data-region="day" data-year="2099" data-month="6" data-day="20">
+          <div data-region="day-content">
+            <ul>
+              <li data-region="event-item"
+                  data-event-component="mod_quiz"
+                  data-event-eventtype="close"
+                  data-event-id="1003"
+                  data-eventtype-course="1">
+                <a data-action="view-event"
+                   data-event-id="1003"
+                   href="https://learnweb.example.com/mod/quiz/view.php?id=8003"
+                   title="Probeklausur LA endet">
+                  <span class="calendar-circle calendar_event_course">&nbsp;</span>
+                  <span class="eventname">Probeklausur LA endet</span>
+                </a>
+              </li>
+            </ul>
+          </div>
+        </td>
+        <td data-region="day" data-year="2099" data-month="7" data-day="1">
+          <div data-region="day-content">
+            <ul>
+              <li data-region="event-item"
+                  data-event-component="mod_page"
+                  data-event-eventtype="course"
+                  data-event-id="1004"
+                  data-eventtype-course="1">
+                <a data-action="view-event"
+                   data-event-id="1004"
+                   href="https://learnweb.example.com/mod/page/view.php?id=8004"
+                   title="Klausurvorbereitung">
+                  <span class="calendar-circle calendar_event_course">&nbsp;</span>
+                  <span class="eventname">Klausurvorbereitung</span>
+                </a>
+              </li>
+            </ul>
+          </div>
+        </td>
+      </tr>
+
+    </tbody>
+  </table>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+logs/
+.npm-cache/
+.DS_Store
+*.log
+.claude/
+
+# Live-Recon-Dumps von Learnweb (enthalten PII, dürfen nie committed werden).
+# Tests nutzen stattdessen die synthetischen Fixtures daneben.
+test/fixtures/learnweb/_live/

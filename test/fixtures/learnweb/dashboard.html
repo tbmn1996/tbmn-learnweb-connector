@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<!--
+  Synthetische Fixture: Moodle-Dashboard (/my/index.php)
+  Abbildung echter Learnweb-DOM-Struktur (Moodle 4.x), ohne PII.
+
+  Geprüfte Selektoren:
+    - a[href*="/course/view.php?id="] für parseCourses
+    - dedupe via course_id
+-->
+<html lang="de">
+<head><title>Dashboard — Learnweb</title></head>
+<body>
+<nav aria-label="Breadcrumb"><a href="/my/">Dashboard</a></nav>
+
+<section class="course-cards">
+  <!-- Tile-Darstellung: voller Kursname im title-Attribut. -->
+  <article class="coursebox">
+    <a href="/course/view.php?id=101" title="Analysis für Wirtschaftswissenschaftler">
+      Analysis
+    </a>
+  </article>
+
+  <article class="coursebox">
+    <a href="/course/view.php?id=202" title="Operations Research SoSe 2099">
+      OR
+    </a>
+  </article>
+
+  <article class="coursebox">
+    <a href="https://learnweb.example.com/course/view.php?id=303" title="Informatik II">
+      Informatik II
+    </a>
+  </article>
+</section>
+
+<section class="course-list">
+  <!-- Listen-Darstellung: wiederholt die gleichen Kurse (dedupe-Test). -->
+  <ul>
+    <li><a href="/course/view.php?id=101">Analysis für Wirtschaftswissenschaftler</a></li>
+    <li><a href="/course/view.php?id=202">Operations Research SoSe 2099</a></li>
+    <li><a href="/course/view.php?id=303">Informatik II</a></li>
+  </ul>
+</section>
+
+<!-- Kurs ohne title-Attribut, damit der Link-Text als Name genutzt wird. -->
+<a href="/course/view.php?id=404">Lineare Algebra</a>
+
+<!-- Kurs ohne id-Parameter: muss ignoriert werden. -->
+<a href="/course/view.php?cat=42">Kurskategorie</a>
+
+<!-- Kurs, dessen URL zufällig auch woanders referenziert wird. -->
+<a href="/course/view.php?id=101">Analysis (Duplikat — muss dedupe werden)</a>
+</body>
+</html>

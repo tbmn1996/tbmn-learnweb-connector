@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<!--
+  Synthetische Fixture: Moodle-Quiz mit bisherigen Attempts.
+  Abbildet die Moodle-4.x-Struktur nach mindestens einem abgeschlossenen Versuch:
+    - div.activity-header    → Opens/Closes
+    - div.activity-description → Beschreibung
+    - div.quizinfo           → Grading method, Attempts allowed, Overall grade
+    - div.quizattempt / table.quizattemptsummary → 3 Attempts (2× Finished, 1× In progress)
+-->
+<html lang="en">
+<head><title>Probeklausur Analysis</title></head>
+<body>
+
+<div class="activity-header" data-for="page-activity-header">
+  <h1>Probeklausur Analysis</h1>
+  <div class="activity-dates">
+    <div><strong>Opened:</strong> Wednesday, 1 April 2026, 12:00 PM</div>
+    <div><strong>Closes:</strong> Saturday, 30 August 2026, 9:00 AM</div>
+  </div>
+</div>
+
+<div class="activity-description" id="intro">
+  <p>Probeklausur zur Vorbereitung auf die Abschlussklausur. 3 Versuche erlaubt.</p>
+</div>
+
+<div role="main">
+  <div class="box py-3 quizinfo">
+    <p class="text-start">Grading method: Highest grade</p>
+    <p class="text-start">Attempts allowed: 3</p>
+    <p class="text-start">Grade: 8.50 / 10.00</p>
+  </div>
+
+  <div class="box py-3 quizattempt">
+    <table class="quizattemptsummary generaltable">
+      <thead>
+        <tr>
+          <th>Attempt</th>
+          <th>State</th>
+          <th>Marks / 10.00</th>
+          <th>Grade / 100.00</th>
+          <th>Review</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>Finished</td>
+          <td>7.00/10.00</td>
+          <td>70.00%</td>
+          <td><a href="/mod/quiz/review.php?attempt=1001&amp;cmid=6001">Review</a></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>Finished</td>
+          <td>8.50/10.00</td>
+          <td>85.00%</td>
+          <td><a href="/mod/quiz/review.php?attempt=1002&amp;cmid=6001">Review</a></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>In progress</td>
+          <td></td>
+          <td></td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+</body>
+</html>
