@@ -72,3 +72,14 @@ test("search-courses: 16. Aufruf im Window blockiert, danach Recovery", () => {
 
   _testing.resetSearchRateLimitForTests();
 });
+
+test("search-courses: Timeout wird auf spezifischen Tool-Fehler gemappt", () => {
+  const result = _testing.buildSearchTimeoutResult();
+
+  assert.equal(result.isError, true);
+  assert.deepEqual(result.structuredContent, {
+    error: true,
+    code: "learnweb_timeout",
+    message: "Learnweb course search timed out. Please try again.",
+  });
+});

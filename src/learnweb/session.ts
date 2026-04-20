@@ -52,6 +52,13 @@ export class LearnwebAuthError extends Error {
   }
 }
 
+export class LearnwebTimeoutError extends Error {
+  constructor(message = "Learnweb request timed out.") {
+    super(message);
+    this.name = "LearnwebTimeoutError";
+  }
+}
+
 /**
  * Public contract einer Learnweb-Antwort. Wir reichen nur die für Parser
  * relevanten Felder durch; Cookie-Details bleiben im Jar.
@@ -142,21 +149,22 @@ export class LearnwebSession {
    *
    * @param path Pfad ("/course/view.php?id=123") oder absolute URL auf demselben Host
    * @param options.allowRedirects wenn true, folgen wir Redirects die NICHT auf Login zeigen
+   * @param options.timeoutMs optionaler Request-Timeout nur für diesen GET
    */
   public async get(
     path: string,
-    options: { allowRedirects?: boolean } = {}
+    options: { allowRedirects?: boolean; timeoutMs?: number } = {}
   ): Promise<LearnwebResponse> {
     await this.throttleInterCall();
     await this.acquireSemaphore();
     try {
       await this.ensureLoggedIn();
-      let resp = await this.rawGet(path);
+      let resp = await this.rawGet(path, options.timeoutMs);
 
       // Login-Redirect erkannt → Re-Login und nochmal versuchen.
       if (this.isLoginRedirect(resp)) {
         await this.performLogin(/* force */ true);
-        resp = await this.rawGet(path);
+        resp = await this.rawGet(path, options.timeoutMs);
         if (this.isLoginRedirect(resp)) {
           throw new LearnwebAuthError("Session could not be re-established.");
         }
@@ -165,7 +173,7 @@ export class LearnwebSession {
       if (options.allowRedirects && isRedirect(resp.status)) {
         const location = resp.headers["location"];
         if (location) {
-          resp = await this.rawGet(location);
+          resp = await this.rawGet(location, options.timeoutMs);
         }
       }
 
@@ -186,14 +194,24 @@ export class LearnwebSession {
   }
 
   /** Roher GET ohne Semaphore/Throttle — nur intern benutzen. */
-  private async rawGet(path: string): Promise<LearnwebResponse> {
-    const resp = await this.client.get(path);
-    return {
-      status: resp.status,
-      url: resp.request?.res?.responseUrl ?? this.resolveUrl(path),
-      headers: normalizeHeaders(resp.headers),
-      data: typeof resp.data === "string" ? resp.data : String(resp.data ?? ""),
-    };
+  private async rawGet(
+    path: string,
+    timeoutMs = REQUEST_TIMEOUT_MS
+  ): Promise<LearnwebResponse> {
+    try {
+      const resp = await this.client.get(path, { timeout: timeoutMs });
+      return {
+        status: resp.status,
+        url: resp.request?.res?.responseUrl ?? this.resolveUrl(path),
+        headers: normalizeHeaders(resp.headers),
+        data: typeof resp.data === "string" ? resp.data : String(resp.data ?? ""),
+      };
+    } catch (error) {
+      if (isAxiosTimeoutError(error)) {
+        throw new LearnwebTimeoutError();
+      }
+      throw error;
+    }
   }
 
   /** Erzeugt absoluten URL-String aus Pfad oder URL. */
@@ -341,4 +359,11 @@ function normalizeHeaders(h: unknown): Record<string, string> {
 
 function isRedirect(status: number): boolean {
   return status >= 300 && status < 400;
+}
+
+function isAxiosTimeoutError(error: unknown): boolean {
+  if (!axios.isAxiosError(error)) {
+    return false;
+  }
+  return error.code === "ECONNABORTED" || error.code === "ETIMEDOUT";
 }

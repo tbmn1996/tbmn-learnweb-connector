@@ -41,6 +41,7 @@ Limitations:
 - `limit` ist nur ein Upper Bound. Wenn Moodle serverseitig weniger Treffer pro Seite rendert, ist das kein Ende der Trefferliste.
 - Für Pagination darf **nur** `has_more` verwendet werden, niemals `results.length < limit`.
 - Das Tool hat ein in-memory Rate-Limit von 15 Aufrufen pro 30 Sekunden. Nach einem Railway-Redeploy startet dieser Zähler neu.
+- Für die Suche gilt intern ein längerer Request-Timeout von 30 Sekunden. Wenn Learnweb selbst zu langsam antwortet, liefert das Tool gezielt `learnweb_timeout` statt eines generischen `learnweb_error`.
 - Das Output-Format enthält bewusst **kein** `shortname`, weil Klammer-Inhalte im Suchergebnis semantisch nicht stabil genug sind.
 
 ## Setup (lokal, stdio-Modus)

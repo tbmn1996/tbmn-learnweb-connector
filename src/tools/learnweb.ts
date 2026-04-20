@@ -28,6 +28,7 @@ import {
   LearnwebAuthError,
   LearnwebNotConfiguredError,
   LearnwebSession,
+  LearnwebTimeoutError,
 } from "../learnweb/session";
 import { parseCourses } from "../learnweb/parsers/courses";
 import { parseCourseOverview } from "../learnweb/parsers/overview";
@@ -62,6 +63,7 @@ const SEARCH_MAX_LIMIT = 50;
 const SEARCH_MAX_PAGE = 20;
 const SEARCH_RATE_LIMIT_MAX = 15;
 const SEARCH_RATE_LIMIT_WINDOW_MS = 30_000;
+const SEARCH_REQUEST_TIMEOUT_MS = 30_000;
 const searchCallTimestamps: number[] = [];
 
 type SearchRateLimitResult =
@@ -125,6 +127,19 @@ function analyzeCourseSearchHtml(html: string): SearchHtmlAnalysis {
     hasNoResultsMarker,
     isValidEmptyState: hasRegionMain && hasNoResultsMarker,
   };
+}
+
+function buildSearchTimeoutResult() {
+  const payload = {
+    error: true as const,
+    code: "learnweb_timeout",
+    message: "Learnweb course search timed out. Please try again.",
+  };
+  return ok(payload, {
+    text: JSON.stringify(payload),
+    structuredContent: payload,
+    isError: true,
+  });
 }
 
 /**
@@ -332,56 +347,65 @@ export function registerLearnwebTools(server: McpServer, scope?: WorkspaceScope)
       annotations: READ_ONLY_TOOL_ANNOTATIONS,
     },
     async (args: { query: string; page?: number; limit?: number }) => {
-      return wrapHandler(async () => {
+      try {
         const rateLimit = checkSearchRateLimit();
         if (!rateLimit.ok) {
-          return {
+          return ok({
             error: true,
             code: "rate_limited",
             message: `Search rate limit exceeded. Retry in ${rateLimit.retryAfterSeconds} seconds.`,
             retryAfterSeconds: rateLimit.retryAfterSeconds,
-          };
+          });
         }
 
         const session = LearnwebSession.getInstance();
         const page = args.page ?? 0;
         const limit = args.limit ?? SEARCH_DEFAULT_LIMIT;
-        const resp = await session.get(buildCourseSearchPath(args.query, page, limit));
+        const resp = await session.get(buildCourseSearchPath(args.query, page, limit), {
+          timeoutMs: SEARCH_REQUEST_TIMEOUT_MS,
+        });
 
         if (resp.status < 200 || resp.status >= 300) {
-          return {
+          return ok({
             error: true,
             code: "course_search_unavailable",
             message: "Could not load course search.",
-          };
+          });
         }
 
         const html = resp.data;
         const analysis = analyzeCourseSearchHtml(html);
         if (!analysis.hasRegionMain) {
-          return {
+          return ok({
             error: true,
             code: "unexpected_html",
             message: "Unexpected HTML structure in course search response.",
-          };
+          });
         }
 
         const parsed = parseCourseSearch(html, session.getBaseUrl(), page);
         if (parsed.results.length === 0 && !analysis.isValidEmptyState) {
-          return {
+          return ok({
             error: true,
             code: "unexpected_html",
             message: "Unexpected HTML structure in course search response.",
-          };
+          });
         }
 
-        return {
+        return ok({
           results: parsed.results.slice(0, limit),
           page: parsed.page,
           has_more: parsed.has_more,
           effective_perpage: parsed.results.length,
-        };
-      });
+        });
+      } catch (err) {
+        if (err instanceof LearnwebTimeoutError) {
+          return buildSearchTimeoutResult();
+        }
+        return wrapHandler(async () => {
+          throw err;
+        });
+      }
     }
   );
 }
@@ -467,4 +491,5 @@ export const _testing = {
   checkSearchRateLimit,
   resetSearchRateLimitForTests,
   analyzeCourseSearchHtml,
+  buildSearchTimeoutResult,
 };
