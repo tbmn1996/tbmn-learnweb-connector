@@ -7,6 +7,9 @@
   "scripts": {
     "build": "tsc",
     "dev": "ts-node-dev --respawn --transpile-only src/mcp-server.ts",
+    "keychain:bootstrap": "bash ./scripts/bootstrap-keychain.sh",
+    "start:stdio:keychain": "bash ./scripts/start-stdio-keychain.sh",
+    "codex:mcp:register": "bash ./scripts/register-codex-mcp.sh",
     "start": "node dist/mcp-server.js",
     "start:http": "MCP_TRANSPORT=http node dist/mcp-server.js",
     "test": "npm run build && node --test test/**/*.test.js"

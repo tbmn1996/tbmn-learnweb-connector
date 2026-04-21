@@ -44,19 +44,44 @@ Limitations:
 - Für die Suche gilt intern ein längerer Request-Timeout von 30 Sekunden. Wenn Learnweb selbst zu langsam antwortet, liefert das Tool gezielt `learnweb_timeout` statt eines generischen `learnweb_error`.
 - Das Output-Format enthält bewusst **kein** `shortname`, weil Klammer-Inhalte im Suchergebnis semantisch nicht stabil genug sind.
 
-## Setup (lokal, stdio-Modus)
+## Setup (lokal, stdio-Modus, bevorzugt via macOS-Keychain)
 
-Für lokale Tests mit Claude Desktop oder direktem MCP-Client.
+Für lokale Codex-/Claude-Setups ist die **macOS-Keychain der bevorzugte
+Credential-Speicher**. Neue lokale Integrationen in diesem Repo sollen die
+Learnweb-Credentials aus der Keychain lesen, nicht aus einer dauerhaft
+gepflegten `.env`.
+
+Schnellstart für Codex lokal:
 
 ```bash
 npm install
-cp .env.example .env     # Werte eintragen: LEARNWEB_URL, LEARNWEB_USERNAME, LEARNWEB_PASSWORD
+npm run build
+npm run keychain:bootstrap
+npm run codex:mcp:register
+```
+
+Danach eine neue Codex-Session starten. Der registrierte MCP-Server heißt
+standardmäßig `tbmnLearnweb` und startet intern
+`scripts/start-stdio-keychain.sh`.
+
+Kanonische Keychain-Konvention:
+
+- Service: `tbmn-learnweb-connector`
+- Accounts: `LEARNWEB_URL`, `LEARNWEB_USERNAME`, `LEARNWEB_PASSWORD`
+
+Im stdio-Modus ist **keine OAuth-Konfiguration** nötig — der Connector läuft
+direkt mit den Moodle-Credentials aus der Keychain.
+
+Fallback für lokale Dev-Setups:
+
+```bash
+cp .env.example .env
 npm run build
 MCP_TRANSPORT=stdio npm start
 ```
 
-Im stdio-Modus ist **keine OAuth-Konfiguration** nötig — der Connector läuft
-direkt mit den Moodle-Credentials aus `.env`.
+Die ausführliche lokale Anleitung inklusive exakter `security`-Kommandos liegt
+unter [docs/local-codex-keychain-setup.md](docs/local-codex-keychain-setup.md).
 
 ## Setup (HTTP-Modus, Production / Railway)
 
