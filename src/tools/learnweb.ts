@@ -1,12 +1,13 @@
 /**
  * MCP-Tools für Learnweb/Moodle — read-only.
  *
- * Fünf Tools:
+ * Sechs Tools:
  *   1. learnweb-get-courses          → alle Kurse des Users
  *   2. learnweb-get-course-overview  → Struktur eines Kurses
  *   3. learnweb-read-activity        → strukturierter Inhalt einer Aktivität
  *   4. learnweb-get-timeline         → anstehende Aktivitäten (Upcoming-View)
  *   5. learnweb-search-courses       → globale Kurssuche über /course/search.php
+ *   6. learnweb-get-calendar-month   → Kalenderansicht für einen Monat
  *
  * Sicherheitsgrenze:
  *   Die Tools werden ausschliesslich registriert, wenn
@@ -27,8 +28,10 @@ import {
 import {
   LearnwebAuthError,
   LearnwebNotConfiguredError,
+  LearnwebParseError,
   LearnwebSession,
   LearnwebTimeoutError,
+  LearnwebUpstreamError,
 } from "../learnweb/session";
 import { parseCourses } from "../learnweb/parsers/courses";
 import { parseCourseOverview } from "../learnweb/parsers/overview";
@@ -40,7 +43,7 @@ import { parseForum } from "../learnweb/parsers/forum";
 import { parseAssign } from "../learnweb/parsers/assign";
 import { parseQuiz } from "../learnweb/parsers/quiz";
 import { parseRatingAllocate } from "../learnweb/parsers/ratingallocate";
-import { parseTimeline } from "../learnweb/parsers/timeline";
+import { parseCalendarMonth, parseTimeline } from "../learnweb/parsers/timeline";
 import { parseFolder } from "../learnweb/parsers/folder";
 import { parseWorkshop } from "../learnweb/parsers/workshop";
 import { parseLesson } from "../learnweb/parsers/lesson";
@@ -299,10 +302,21 @@ export function registerLearnwebTools(server: McpServer, scope?: WorkspaceScope)
           .array(z.string().regex(MODTYPE_RE))
           .optional()
           .describe("Optional filter by modtype, e.g. ['quiz', 'assign']."),
+        course_id: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Optional. Only return events for this Moodle course id."),
+        event_type: z
+          .string()
+          .regex(/^[a-z_]+$/)
+          .optional()
+          .describe("Optional. Filter by event type, e.g. 'due', 'open', 'close'."),
       } as ToolInputSchema,
       annotations: READ_ONLY_TOOL_ANNOTATIONS,
     },
-    async (args: { window_days?: number; modtypes?: string[] }) => {
+    async (args: { window_days?: number; modtypes?: string[]; course_id?: number; event_type?: string }) => {
       return wrapHandler(async () => {
         const session = LearnwebSession.getInstance();
         return parseTimeline(session, args);
@@ -408,6 +422,34 @@ export function registerLearnwebTools(server: McpServer, scope?: WorkspaceScope)
       }
     }
   );
+
+  // ------------------------------------------------------------------
+  // Tool 6: learnweb-get-calendar-month
+  // ------------------------------------------------------------------
+  registerTool(
+    "learnweb-get-calendar-month",
+    {
+      title: "Learnweb: Calendar Month View",
+      description:
+        "Return all calendar events for a given Moodle month (defaults to current month). " +
+        "Use this tool when the upcoming-view does not cover far-future deadlines.",
+      inputSchema: {
+        year: z.number().int().min(2020).max(2100).optional()
+          .describe("Optional. Year (e.g. 2026). Defaults to current year."),
+        month: z.number().int().min(1).max(12).optional()
+          .describe("Optional. Month 1–12. Defaults to current month."),
+        course_id: z.number().int().positive().optional()
+          .describe("Optional. Restrict to events for this Moodle course id."),
+      } as ToolInputSchema,
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async (args: { year?: number; month?: number; course_id?: number }) => {
+      return wrapHandler(async () => {
+        const session = LearnwebSession.getInstance();
+        return parseCalendarMonth(session, args);
+      });
+    }
+  );
 }
 
 /**
@@ -459,19 +501,19 @@ async function wrapHandler<T>(fn: () => Promise<T>) {
     const value = await fn();
     return ok(value as unknown);
   } catch (err) {
+    // Bewusst generische Messages — keine Cookie-Details oder Diagnostics rausgeben.
     const code =
-      err instanceof LearnwebNotConfiguredError
-        ? "learnweb_not_configured"
-        : err instanceof LearnwebAuthError
-          ? "learnweb_auth_error"
-          : "learnweb_error";
-    // Bewusst generische Message, damit keine Cookie-Details o.ä. rausfliessen.
+      err instanceof LearnwebNotConfiguredError ? "learnweb_not_configured"
+      : err instanceof LearnwebAuthError        ? "learnweb_auth_error"
+      : err instanceof LearnwebParseError       ? "learnweb_parse_error"
+      : err instanceof LearnwebUpstreamError    ? "learnweb_upstream_error"
+      :                                           "learnweb_error";
     const message =
-      err instanceof LearnwebNotConfiguredError
-        ? "Learnweb is not configured on this server."
-        : err instanceof LearnwebAuthError
-          ? "Learnweb authentication failed."
-          : "Learnweb request failed.";
+      err instanceof LearnwebNotConfiguredError ? "Learnweb is not configured on this server."
+      : err instanceof LearnwebAuthError        ? "Learnweb authentication failed."
+      : err instanceof LearnwebParseError       ? "Learnweb response could not be parsed."
+      : err instanceof LearnwebUpstreamError    ? "Learnweb upstream returned an error."
+      :                                           "Learnweb request failed.";
     return ok(
       { error: true, code, message },
       {

@@ -54,13 +54,17 @@ export function extractTextFromSelector(
 }
 
 /**
- * Extrahiert die numerische Course-ID aus einer URL wie
- * ".../course/view.php?id=1234"
+ * Extrahiert die numerische Course-ID aus einer URL.
+ * Priorisiert course= / courseid= vor id= (id= gilt nur für /course/view.php).
  */
 export function courseIdFromUrl(url: string): number | null {
-  const m = url.match(/[?&]id=(\d+)/);
-  if (!m) return null;
-  return Number.parseInt(m[1], 10);
+  const courseMatch = url.match(/[?&](?:course|courseid)=(\d+)/);
+  if (courseMatch) return Number.parseInt(courseMatch[1], 10);
+  if (/\/course\/view\.php/.test(url)) {
+    const idMatch = url.match(/[?&]id=(\d+)/);
+    if (idMatch) return Number.parseInt(idMatch[1], 10);
+  }
+  return null;
 }
 
 /**

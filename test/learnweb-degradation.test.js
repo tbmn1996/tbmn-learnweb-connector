@@ -2,13 +2,18 @@
  * Degradation-Tests: wenn eine Fixture keine der erwarteten Selektoren
  * matcht, sollen die Parser weder crashen noch eine leere Struktur liefern,
  * sondern parser_degraded:true + (wenn möglich) raw_text setzen.
+ *
+ * Timeline-spezifisch: parseTimeline und parseCalendarMonth werfen jetzt
+ * LearnwebParseError / LearnwebUpstreamError statt parser_degraded:true zu setzen.
  */
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 
 const ROOT = path.resolve(__dirname, "..");
+const FIXTURES = path.join(ROOT, "test/fixtures/learnweb");
 
 const { parseCourseOverview } = require(path.join(ROOT, "dist/learnweb/parsers/overview"));
 const { parseForum } = require(path.join(ROOT, "dist/learnweb/parsers/forum"));
@@ -16,17 +21,34 @@ const { parseAssign } = require(path.join(ROOT, "dist/learnweb/parsers/assign"))
 const { parseQuiz } = require(path.join(ROOT, "dist/learnweb/parsers/quiz"));
 const { parseRatingAllocate } = require(path.join(ROOT, "dist/learnweb/parsers/ratingallocate"));
 const { parseFallback } = require(path.join(ROOT, "dist/learnweb/parsers/fallback"));
+const { parseTimeline, parseCalendarMonth } = require(path.join(ROOT, "dist/learnweb/parsers/timeline"));
+const { LearnwebParseError, LearnwebUpstreamError } = require(path.join(ROOT, "dist/learnweb/session"));
 
 const BASE_URL = "https://learnweb.example.com";
+
+function readFixture(name) {
+  return fs.readFileSync(path.join(FIXTURES, name), "utf8");
+}
 
 function fakeSession(html, requestedPath) {
   return {
     getBaseUrl: () => BASE_URL,
+    async hasMoodleCookie() { return true; },
     async get(p) {
       if (requestedPath && p !== requestedPath) {
         throw new Error(`FakeSession: unerwarteter Pfad ${p}`);
       }
       return { status: 200, url: BASE_URL + p, headers: {}, data: html };
+    },
+  };
+}
+
+function fakeSessionWithStatus(status, html = "") {
+  return {
+    getBaseUrl: () => BASE_URL,
+    async hasMoodleCookie() { return false; },
+    async get(p) {
+      return { status, url: BASE_URL + p, headers: {}, data: html };
     },
   };
 }
@@ -87,4 +109,57 @@ test("fallback: liefert immer parser_degraded:true, auch für bekannte Seiten", 
   const result = await parseFallback(session, 4242, "unknownmod");
   assert.equal(result.parser_degraded, true);
   assert.ok(result.content.raw_text.length > 0);
+});
+
+// ------------------------------------------------------------------
+// parseTimeline: Throw-Verhalten
+// ------------------------------------------------------------------
+test("parseTimeline: wirft LearnwebParseError wenn Container fehlt", async () => {
+  const session = fakeSession(
+    readFixture("timeline-empty-degraded.html"),
+    "/calendar/view.php?view=upcoming"
+  );
+  await assert.rejects(
+    () => parseTimeline(session, {}),
+    (err) => {
+      assert.ok(err instanceof LearnwebParseError, `Erwartet LearnwebParseError, bekam ${err?.name}`);
+      return true;
+    }
+  );
+});
+
+test("parseTimeline: wirft LearnwebUpstreamError bei non-2xx Response", async () => {
+  const session = fakeSessionWithStatus(503);
+  await assert.rejects(
+    () => parseTimeline(session, {}),
+    (err) => {
+      assert.ok(err instanceof LearnwebUpstreamError, `Erwartet LearnwebUpstreamError, bekam ${err?.name}`);
+      return true;
+    }
+  );
+});
+
+// ------------------------------------------------------------------
+// parseCalendarMonth: Throw-Verhalten
+// ------------------------------------------------------------------
+test("parseCalendarMonth: wirft LearnwebParseError wenn Container fehlt", async () => {
+  const session = {
+    getBaseUrl: () => BASE_URL,
+    async hasMoodleCookie() { return true; },
+    async get() {
+      return {
+        status: 200,
+        url: BASE_URL + "/calendar/view.php?view=month&time=123",
+        headers: {},
+        data: readFixture("timeline-empty-degraded.html"),
+      };
+    },
+  };
+  await assert.rejects(
+    () => parseCalendarMonth(session, { year: 2026, month: 5 }),
+    (err) => {
+      assert.ok(err instanceof LearnwebParseError, `Erwartet LearnwebParseError, bekam ${err?.name}`);
+      return true;
+    }
+  );
 });

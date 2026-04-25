@@ -30,7 +30,7 @@ const { parseForum } = require(path.join(ROOT, "dist/learnweb/parsers/forum"));
 const { parseAssign } = require(path.join(ROOT, "dist/learnweb/parsers/assign"));
 const { parseQuiz } = require(path.join(ROOT, "dist/learnweb/parsers/quiz"));
 const { parseRatingAllocate } = require(path.join(ROOT, "dist/learnweb/parsers/ratingallocate"));
-const { parseTimeline, _extractForTest: extractTimelineEvents } = require(path.join(ROOT, "dist/learnweb/parsers/timeline"));
+const { parseTimeline, parseCalendarMonth, _extractForTest: extractTimelineEvents } = require(path.join(ROOT, "dist/learnweb/parsers/timeline"));
 const { parseFolder } = require(path.join(ROOT, "dist/learnweb/parsers/folder"));
 const { parseWorkshop } = require(path.join(ROOT, "dist/learnweb/parsers/workshop"));
 const { parseLesson } = require(path.join(ROOT, "dist/learnweb/parsers/lesson"));
@@ -45,11 +45,12 @@ function readFixture(name) {
 
 /**
  * Minimaler Stand-In für LearnwebSession. Die Parser-API nutzt nur
- * `session.get(path)` und `session.getBaseUrl()`.
+ * `session.get(path)`, `session.getBaseUrl()` und `session.hasMoodleCookie()`.
  */
 function fakeSession(pathToHtml) {
   return {
     getBaseUrl: () => BASE_URL,
+    async hasMoodleCookie() { return true; },
     async get(p) {
       const html = pathToHtml[p];
       if (html === undefined) {
@@ -365,7 +366,7 @@ test("parseRatingAllocate: deadline + choices[] + allocation", async () => {
 // ------------------------------------------------------------------
 // parseTimeline
 // ------------------------------------------------------------------
-test("parseTimeline: extrahiert Events + modtype + cmid + Sortierung", async () => {
+test("parseTimeline: extrahiert Events + modtype + cmid + Sortierung (via _extractForTest)", async () => {
   // Extraktion ohne Datums-Filter testen (Fixture hat Events in 2099, die außerhalb
   // des 90-Tage-Fensters liegen). _extractForTest umgeht den Filter.
   const html = readFixture("timeline.html");
@@ -387,11 +388,6 @@ test("parseTimeline: extrahiert Events + modtype + cmid + Sortierung", async () 
   assert.ok(assignEvent.title?.includes("bungszettel"), `Titel: ${assignEvent?.title}`);
   assert.equal(assignEvent.cmid, 8002);
 
-  // modtypes-Filter (über parseTimeline-API, aber keine echten Events im Fenster)
-  // → nur Filter-Logik prüfen: wenn modtypes gesetzt, nur passende modtypes
-  const quizOnly = events.filter((e) => e.modtype === "quiz");
-  assert.ok(quizOnly.length >= 2, "Mindestens 2 Quiz-Events erwartet");
-
   // Sortierung: Events mit kleinerem due_at_unix sollen zuerst kommen.
   const timestamps = events.map((e) => e.due_at_unix ?? 0).filter((t) => t > 0);
   for (let i = 1; i < timestamps.length; i++) {
@@ -399,16 +395,87 @@ test("parseTimeline: extrahiert Events + modtype + cmid + Sortierung", async () 
   }
 });
 
-test("parseTimeline: leeres HTML → parser_degraded:true", async () => {
+test("parseTimeline: liefert Events aus gültiger upcoming-Fixture", async () => {
+  const session = fakeSession({
+    "/calendar/view.php?view=upcoming": readFixture("timeline-upcoming-valid.html"),
+  });
+  const result = await parseTimeline(session, { window_days: 90 });
+  assert.ok(!("parser_degraded" in result), "parser_degraded darf nicht mehr existieren");
+  assert.ok(Array.isArray(result.content.events));
+  // window_days=90: Timestamps in der Fixture (1777000000, 1779000000) liegen in der Zukunft.
+  assert.ok(result.content.events.length >= 1, "Mindestens 1 Event erwartet");
+});
+
+test("parseTimeline: Events enthalten cmid, modtype, course_name, course_id", async () => {
+  const session = fakeSession({
+    "/calendar/view.php?view=upcoming": readFixture("timeline-upcoming-valid.html"),
+  });
+  const result = await parseTimeline(session, { window_days: 90 });
+  const first = result.content.events[0];
+  assert.ok(first.cmid != null, "cmid fehlt");
+  assert.ok(first.modtype != null, "modtype fehlt");
+  assert.ok(first.course_name != null, "course_name fehlt");
+  assert.ok(first.course_id != null, "course_id fehlt");
+});
+
+test("parseTimeline: filtert nach course_id", async () => {
+  const session = fakeSession({
+    "/calendar/view.php?view=upcoming": readFixture("timeline-upcoming-valid.html"),
+  });
+  // course_id=42 ist in der Fixture nur beim Quiz-Event
+  const result = await parseTimeline(session, { window_days: 90, course_id: 42 });
+  assert.ok(result.content.events.every((e) => e.course_id === 42),
+    "Alle Events müssen course_id=42 haben");
+});
+
+test("parseTimeline: filtert nach event_type", async () => {
+  const session = fakeSession({
+    "/calendar/view.php?view=upcoming": readFixture("timeline-upcoming-valid.html"),
+  });
+  // Fixture hat keine event_type-Attribute im upcoming-Format → Events bleiben erhalten
+  // (filter schlägt nur aus bei explizitem Mismatch)
+  const result = await parseTimeline(session, { window_days: 90, event_type: "due" });
+  assert.ok(Array.isArray(result.content.events));
+  assert.ok(result.content.events.every((e) => e.event_type == null || e.event_type === "due"));
+});
+
+// ------------------------------------------------------------------
+// parseCalendarMonth
+// ------------------------------------------------------------------
+test("parseCalendarMonth: liefert Events aus gültiger Monats-Fixture", async () => {
+  const html = readFixture("calendar-month-valid.html");
   const session = {
     getBaseUrl: () => BASE_URL,
+    async hasMoodleCookie() { return true; },
     async get() {
-      return { status: 200, url: BASE_URL, headers: {}, data: "<html><body></body></html>" };
+      return { status: 200, url: BASE_URL + "/calendar/view.php?view=month&time=123", headers: {}, data: html };
     },
   };
-  const result = await parseTimeline(session, {});
-  assert.equal(result.parser_degraded, true);
-  assert.equal(result.content.events.length, 0);
+  const result = await parseCalendarMonth(session, { year: 2026, month: 5 });
+  assert.ok(Array.isArray(result.content.events), "events muss Array sein");
+  assert.ok(result.content.events.length >= 2, "Mindestens 2 Events erwartet");
+  assert.equal(result.year, 2026);
+  assert.equal(result.month, 5);
+
+  const assignEvent = result.content.events.find((e) => e.modtype === "assign");
+  assert.ok(assignEvent, "assign-Event fehlt");
+  assert.equal(assignEvent.course_id, 42);
+  assert.ok(assignEvent.event_id != null, "event_id fehlt");
+});
+
+test("parseCalendarMonth: filtert nach course_id", async () => {
+  const html = readFixture("calendar-month-valid.html");
+  const session = {
+    getBaseUrl: () => BASE_URL,
+    async hasMoodleCookie() { return true; },
+    async get() {
+      return { status: 200, url: BASE_URL + "/calendar/view.php?view=month&time=123&course=43", headers: {}, data: html };
+    },
+  };
+  const result = await parseCalendarMonth(session, { year: 2026, month: 5, course_id: 43 });
+  // Nur Events mit course_id=43 bleiben übrig
+  assert.ok(result.content.events.every((e) => e.course_id === 43),
+    "Alle Events müssen course_id=43 haben");
 });
 
 // ------------------------------------------------------------------

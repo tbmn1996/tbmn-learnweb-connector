@@ -59,6 +59,26 @@ export class LearnwebTimeoutError extends Error {
   }
 }
 
+export class LearnwebParseError extends Error {
+  constructor(
+    message = "Learnweb response could not be parsed.",
+    public readonly diagnostics?: Record<string, unknown>
+  ) {
+    super(message);
+    this.name = "LearnwebParseError";
+  }
+}
+
+export class LearnwebUpstreamError extends Error {
+  constructor(
+    message = "Learnweb upstream returned non-2xx.",
+    public readonly diagnostics?: Record<string, unknown>
+  ) {
+    super(message);
+    this.name = "LearnwebUpstreamError";
+  }
+}
+
 /**
  * Public contract einer Learnweb-Antwort. Wir reichen nur die für Parser
  * relevanten Felder durch; Cookie-Details bleiben im Jar.
@@ -139,6 +159,12 @@ export class LearnwebSession {
 
   public getBaseUrl(): string {
     return this.baseUrl;
+  }
+
+  /** Prüft ob ein Moodle-Session-Cookie vorhanden ist — nur Boolean, kein Cookie-Wert. */
+  public async hasMoodleCookie(): Promise<boolean> {
+    const cookies = await this.jar.getCookies(this.baseUrl);
+    return cookies.some((c) => c.key.toLowerCase().startsWith("moodlesession"));
   }
 
   /**

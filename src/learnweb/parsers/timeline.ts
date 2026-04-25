@@ -1,30 +1,21 @@
 /**
  * Parser für die Moodle-Kalender/Upcoming-Events-Ansicht.
  *
- * Datenquelle: /calendar/view.php?view=upcoming
- * Das Dashboard-Sample zeigt, dass Uni Münster einen Calendar-Block
- * (nicht den Block-Timeline) verwendet. Beide Ansichten nutzen dasselbe
- * event-item-Markup mit data-Attributen:
+ * Datenquellen:
+ *   - /calendar/view.php?view=upcoming  (Block-Timeline-Format)
+ *   - /calendar/view.php?view=month     (Kalender-Monatsansicht)
  *
- *   <li data-region="event-item"
- *       data-event-component="mod_quiz"
- *       data-event-eventtype="open"
- *       data-event-id="6274194">
- *     <a data-action="view-event" href="...mod/quiz/view.php?id=..." title="...">
- *       <span class="eventname">...</span>
- *     </a>
- *   </li>
- *
- * Alternativquelle: Kalender-Monatsansicht (/calendar/view.php oder /my/).
- * Wir versuchen zunächst /calendar/view.php?view=upcoming; enthält sie
- * keine event-items, probieren wir die Monatsansicht-Selektoren auf
- * demselben HTML (in case der Server ignoriert den view-Parameter und
- * immer den Monat rendert).
+ * Fehlerverhalten:
+ *   - non-2xx Response    → LearnwebUpstreamError
+ *   - Container vorhanden, aber 0 Events → return [] (legitim leerer Kalender)
+ *   - Container fehlt     → LearnwebParseError + console.error mit Diagnostics
  */
 
+import { createHash } from "crypto";
 import * as cheerio from "cheerio";
 import type { LearnwebSession } from "../session";
-import { absoluteUrl, cmidFromUrl, normalizeText, parseMoodleDate, truncate } from "./common";
+import { LearnwebParseError, LearnwebUpstreamError } from "../session";
+import { absoluteUrl, cmidFromUrl, courseIdFromUrl, normalizeText, parseMoodleDate, truncate } from "./common";
 
 export interface TimelineEvent {
   title?: string;
@@ -43,21 +34,60 @@ export interface TimelineContent {
   events: TimelineEvent[];
   window_days: number;
   fetched_at: string;
-  parser_degraded?: boolean;
 }
 
 export interface TimelineResult {
   content: TimelineContent;
-  parser_degraded?: boolean;
 }
 
 export interface TimelineOptions {
   window_days?: number;
   modtypes?: string[];
+  course_id?: number;
+  event_type?: string;
 }
 
 const DEFAULT_WINDOW = 30;
 const MAX_WINDOW = 90;
+
+const UPCOMING_CONTAINER = '[data-region="event-list-content"]';
+const MONTH_CONTAINER = ".calendarwrapper";
+
+// --- Diagnostik-Helper ---
+
+async function buildDiagnostics(
+  session: LearnwebSession,
+  $: cheerio.CheerioAPI,
+  resp: { status: number; url: string; data: string },
+  containerSelector: string,
+  extraSelectorHits?: Record<string, number>
+): Promise<Record<string, unknown>> {
+  const containerEl = $(containerSelector);
+  const dataRegions = containerEl
+    .find("[data-region]")
+    .map((_, el) => $(el).attr("data-region") ?? "")
+    .get()
+    .sort();
+  const pageHash = createHash("sha1")
+    .update(JSON.stringify(dataRegions))
+    .digest("hex")
+    .slice(0, 8);
+
+  return {
+    http_status: resp.status,
+    url: resp.url,
+    timestamp: new Date().toISOString(),
+    body_snippet: String(resp.data).slice(0, 2048),
+    has_moodle_cookie: await session.hasMoodleCookie(),
+    selector_hits: {
+      [containerSelector]: containerEl.length,
+      ...extraSelectorHits,
+    },
+    page_hash: pageHash,
+  };
+}
+
+// --- parseTimeline ---
 
 export async function parseTimeline(
   session: LearnwebSession,
@@ -66,12 +96,17 @@ export async function parseTimeline(
   const window_days = clampWindow(options.window_days);
   const fetched_at = new Date().toISOString();
 
+  // session.get() erledigt Auth/Re-Auth/Login-Redirect-Erkennung intern.
   const resp = await session.get("/calendar/view.php?view=upcoming");
+
   if (resp.status < 200 || resp.status >= 300) {
-    return {
-      content: { events: [], window_days, fetched_at, parser_degraded: true },
-      parser_degraded: true,
-    };
+    const diagnostics = await buildDiagnostics(
+      session, cheerio.load(""), resp, UPCOMING_CONTAINER
+    );
+    throw new LearnwebUpstreamError(
+      `Calendar upcoming view returned ${resp.status}.`,
+      diagnostics
+    );
   }
 
   const $ = cheerio.load(resp.data);
@@ -79,9 +114,36 @@ export async function parseTimeline(
 
   let events = extractEventItems($, baseUrl);
 
-  // Fallback: Monatskalender-Selektoren (falls upcoming-View nicht gerendert).
+  // Fallback: Monatskalender-Selektoren falls upcoming-View kein Block-Timeline-Format liefert.
   if (events.length === 0) {
     events = extractCalendarMonthEvents($, baseUrl);
+  }
+
+  const containerExists = $(UPCOMING_CONTAINER).length > 0;
+
+  if (events.length === 0) {
+    if (containerExists) {
+      // Container vorhanden → legitim leerer Kalender.
+      return { content: { events: [], window_days, fetched_at } };
+    }
+    // Container fehlt → Parse-Fehler mit Diagnostics.
+    const diagnostics = await buildDiagnostics(session, $, resp, UPCOMING_CONTAINER, {
+      "event-list-item": $('li[data-region="event-list-item"]').length,
+      "event-item": $('li[data-region="event-item"]').length,
+    });
+    console.error(JSON.stringify({ event: "timeline_parse_degraded", ...diagnostics }));
+    throw new LearnwebParseError(
+      "Timeline events could not be extracted from upcoming view (container missing).",
+      diagnostics
+    );
+  }
+
+  // Filter course_id / event_type.
+  if (options.course_id != null) {
+    events = events.filter((e) => e.course_id === options.course_id);
+  }
+  if (options.event_type) {
+    events = events.filter((e) => e.event_type === options.event_type);
   }
 
   // window_days-Filter: nur Events innerhalb der nächsten N Tage.
@@ -96,7 +158,7 @@ export async function parseTimeline(
       const d = parseMoodleDate(e.due_at);
       if (d) return d.getTime() >= now && d.getTime() <= cutoff;
     }
-    return true; // Falls kein Datum → immer einschließen
+    return true;
   });
 
   // modtypes-Filter.
@@ -112,27 +174,92 @@ export async function parseTimeline(
     return ta - tb;
   });
 
-  return {
-    content: {
-      events,
-      window_days,
-      fetched_at,
-      parser_degraded: events.length === 0 ? true : undefined,
-    },
-    parser_degraded: events.length === 0 ? true : undefined,
-  };
+  return { content: { events, window_days, fetched_at } };
 }
 
+// --- parseCalendarMonth ---
+
+export interface CalendarMonthContent {
+  events: TimelineEvent[];
+  year: number;
+  month: number;
+  fetched_at: string;
+}
+
+export interface CalendarMonthResult {
+  content: CalendarMonthContent;
+  year: number;
+  month: number;
+}
+
+export async function parseCalendarMonth(
+  session: LearnwebSession,
+  options: { year?: number; month?: number; course_id?: number } = {}
+): Promise<CalendarMonthResult> {
+  // Default: aktueller Monat in Europe/Berlin.
+  const nowBerlin = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Europe/Berlin" })
+  );
+  const year = options.year ?? nowBerlin.getFullYear();
+  const month = options.month ?? nowBerlin.getMonth() + 1;
+  const firstOfMonth = new Date(year, month - 1, 1);
+  const unixTime = Math.floor(firstOfMonth.getTime() / 1000);
+  const fetched_at = new Date().toISOString();
+
+  let path = `/calendar/view.php?view=month&time=${unixTime}`;
+  if (options.course_id != null) path += `&course=${options.course_id}`;
+
+  const resp = await session.get(path);
+
+  if (resp.status < 200 || resp.status >= 300) {
+    const diagnostics = await buildDiagnostics(
+      session, cheerio.load(""), resp, MONTH_CONTAINER
+    );
+    throw new LearnwebUpstreamError(
+      `Calendar month view returned ${resp.status}.`,
+      diagnostics
+    );
+  }
+
+  const $ = cheerio.load(resp.data);
+  const baseUrl = session.getBaseUrl();
+  let events = extractCalendarMonthDayEvents($, baseUrl);
+
+  if (options.course_id != null) {
+    events = events.filter((e) => e.course_id === options.course_id);
+  }
+
+  const containerExists = $(MONTH_CONTAINER).length > 0;
+
+  if (events.length === 0) {
+    if (containerExists) {
+      return { content: { events: [], year, month, fetched_at }, year, month };
+    }
+    const diagnostics = await buildDiagnostics(session, $, resp, MONTH_CONTAINER);
+    console.error(JSON.stringify({ event: "calendar_month_parse_degraded", ...diagnostics }));
+    throw new LearnwebParseError(
+      "Calendar month view could not be parsed (container missing).",
+      diagnostics
+    );
+  }
+
+  return { content: { events, year, month, fetched_at }, year, month };
+}
+
+// --- Extraktions-Funktionen ---
+
 /**
- * Extrahiert Events aus der Upcoming-View-Ansicht.
- * Selector: li[data-region="event-list-item"] — Block-Timeline-Format.
+ * Extrahiert Events aus der Upcoming-View (Block-Timeline-Format).
+ * Selector: li[data-region="event-list-item"]
  */
 function extractEventItems(
   $: cheerio.CheerioAPI,
   baseUrl: string
 ): TimelineEvent[] {
   const events: TimelineEvent[] = [];
-  $('li[data-region="event-list-item"]').each((_, li) => {
+  $(
+    'li[data-region="event-list-item"], [data-region="event-list-content"] > li'
+  ).each((_, li) => {
     const $li = $(li);
     const event: TimelineEvent = {};
 
@@ -149,6 +276,8 @@ function extractEventItems(
       if (cmid) event.cmid = cmid;
       const modMatch = href.match(/\/mod\/([a-z_]+)\//);
       if (modMatch) event.modtype = modMatch[1];
+      const cid = courseIdFromUrl(href);
+      if (cid) event.course_id = cid;
     }
 
     const dateText = normalizeText($li.find(".date, time, .event-time").first().text());
@@ -156,6 +285,15 @@ function extractEventItems(
       event.due_at = dateText;
       const parsed = parseMoodleDate(dateText);
       if (parsed) event.due_at_unix = Math.floor(parsed.getTime() / 1000);
+    }
+
+    // Timestamp direkt aus data-Attribut (zuverlässiger als Datums-String).
+    const tsStr =
+      $li.find("[data-timestamp]").first().attr("data-timestamp") ??
+      $li.closest("[data-timestamp]").attr("data-timestamp");
+    if (tsStr) {
+      const ts = parseInt(tsStr, 10);
+      if (!Number.isNaN(ts)) event.due_at_unix = ts;
     }
 
     const courseName = normalizeText($li.find(".coursename, .course-name").first().text());
@@ -167,8 +305,8 @@ function extractEventItems(
 }
 
 /**
- * Extrahiert Events aus der Monatskalender-Ansicht.
- * Selector: li[data-region="event-item"] — Calendar-Block-Format.
+ * Extrahiert Events aus dem Kalender-Block innerhalb der Upcoming-View.
+ * Selector: li[data-region="event-item"]
  */
 function extractCalendarMonthEvents(
   $: cheerio.CheerioAPI,
@@ -180,7 +318,6 @@ function extractCalendarMonthEvents(
     const $li = $(li);
     const event: TimelineEvent = {};
 
-    // Modtype aus data-event-component (z.B. "mod_quiz" → "quiz").
     const component = $li.attr("data-event-component") ?? "";
     if (component.startsWith("mod_")) {
       event.modtype = component.slice(4);
@@ -188,22 +325,20 @@ function extractCalendarMonthEvents(
       event.modtype = component;
     }
 
-    // Event-Typ (open, close, due, ...).
     event.event_type = $li.attr("data-event-eventtype") ?? undefined;
 
-    // Event-ID.
     const eventIdStr = $li.attr("data-event-id");
     if (eventIdStr) event.event_id = parseInt(eventIdStr, 10) || undefined;
 
-    // Timestamp: data-timestamp auf dem Link-Element.
     const $a = $li.find("a[data-action='view-event'], a[href*='/mod/']").first();
-    const tsStr = $a.attr("data-timestamp") ?? $li.closest("[data-timestamp]").attr("data-timestamp");
+    const tsStr =
+      $a.attr("data-timestamp") ??
+      $li.closest("[data-timestamp]").attr("data-timestamp");
     if (tsStr) {
       const ts = parseInt(tsStr, 10);
       if (!Number.isNaN(ts)) event.due_at_unix = ts;
     }
 
-    // Datum aus Eltern-Kalender-Zelle (data-year, data-month, data-day).
     if (!event.due_at_unix) {
       const $day = $li.closest("[data-region='day']");
       const y = $day.attr("data-year");
@@ -217,26 +352,115 @@ function extractCalendarMonthEvents(
       }
     }
 
-    // Titel.
     const titleText =
       normalizeText($a.find(".eventname").text()) ||
       normalizeText($a.attr("title") ?? "") ||
       normalizeText($a.text());
     if (titleText) event.title = truncate(titleText, 300);
 
-    // URL.
     const href = $a.attr("href");
     if (href) {
       event.url = absoluteUrl(baseUrl, href);
-      // cmid aus URL.
       const cmid = cmidFromUrl(href);
       if (cmid) event.cmid = cmid;
-      // course_id (falls url auf course/view.php zeigt) — meist nicht der Fall bei event-items.
     }
 
-    // Kursname aus .coursename-Span falls vorhanden.
-    const courseName = normalizeText($li.find(".coursename, [data-region='course-name']").text());
+    // course_id: data-course-id Attribut bevorzugt, dann URL.
+    const dataCourseId = $li.attr("data-course-id");
+    if (dataCourseId) {
+      event.course_id = parseInt(dataCourseId, 10) || undefined;
+    } else if (href) {
+      const cid = courseIdFromUrl(href);
+      if (cid) event.course_id = cid;
+    }
+
+    const courseName = normalizeText(
+      $li.find(".coursename, [data-region='course-name']").text()
+    );
     if (courseName) event.course_name = truncate(courseName, 200);
+
+    if (event.title) events.push(event);
+  });
+
+  return events;
+}
+
+/**
+ * Extrahiert Events aus der Monatsansicht (/calendar/view.php?view=month).
+ * Selector: [data-region="day"] a[data-action="view-event"]
+ */
+function extractCalendarMonthDayEvents(
+  $: cheerio.CheerioAPI,
+  baseUrl: string
+): TimelineEvent[] {
+  const events: TimelineEvent[] = [];
+
+  $('[data-region="day"] a[data-action="view-event"]').each((_, a) => {
+    const $a = $(a);
+    const $li = $a.closest("li");
+    const event: TimelineEvent = {};
+
+    const component = $li.attr("data-event-component") ?? "";
+    if (component.startsWith("mod_")) {
+      event.modtype = component.slice(4);
+    } else if (component) {
+      event.modtype = component;
+    }
+
+    event.event_type = $li.attr("data-event-eventtype") ?? undefined;
+
+    const eventIdStr = $li.attr("data-event-id");
+    if (eventIdStr) event.event_id = parseInt(eventIdStr, 10) || undefined;
+
+    const tsStr =
+      $a.attr("data-timestamp") ??
+      $a.closest("[data-timestamp]").attr("data-timestamp") ??
+      $li.attr("data-timestamp");
+    if (tsStr) {
+      const ts = parseInt(tsStr, 10);
+      if (!Number.isNaN(ts)) event.due_at_unix = ts;
+    }
+
+    if (!event.due_at_unix) {
+      const $day = $a.closest("[data-region='day']");
+      const y = $day.attr("data-year");
+      const m = $day.attr("data-month");
+      const d = $day.attr("data-day");
+      if (y && m && d) {
+        const dateStr = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        event.due_at = dateStr;
+        const parsed = new Date(dateStr);
+        if (!Number.isNaN(parsed.getTime())) event.due_at_unix = Math.floor(parsed.getTime() / 1000);
+      }
+    }
+
+    const titleText =
+      normalizeText($a.find(".eventname").text()) ||
+      normalizeText($a.attr("title") ?? "") ||
+      normalizeText($a.text());
+    if (titleText) event.title = truncate(titleText, 300);
+
+    const href = $a.attr("href");
+    if (href) {
+      event.url = absoluteUrl(baseUrl, href);
+      const cmid = cmidFromUrl(href);
+      if (cmid) event.cmid = cmid;
+      const cid = courseIdFromUrl(href);
+      if (cid) event.course_id = cid;
+    }
+
+    // course_id aus data-course-id bevorzugt.
+    const dataCourseId = $li.attr("data-course-id");
+    if (dataCourseId) {
+      event.course_id = parseInt(dataCourseId, 10) || undefined;
+    }
+
+    const $td = $a.closest("td");
+    const ariaLabel = $td.attr("aria-label");
+    const courseName =
+      normalizeText($li.find(".coursename").text()) ||
+      (ariaLabel ? truncate(normalizeText(ariaLabel), 200) : "");
+    if (courseName) event.course_name = courseName;
 
     if (event.title) events.push(event);
   });
