@@ -483,11 +483,20 @@ async function extractViaCalendarAjax(
   const wwwroot = session.getMoodleWwwroot();
   // Großzügige Schätzung: window_days * 3, mind. 50, max. 200.
   const limitnum = Math.min(Math.max(window_days * 3, 50), 200);
+  // core_calendar_get_action_events_by_timesort liefert strukturierte Events
+  // (das ist die API hinter Moodles Timeline-Block).
+  const nowUnix = Math.floor(Date.now() / 1000);
+  const cutoffUnix = nowUnix + window_days * 86400;
   const payload = [
     {
       index: 0,
-      methodname: "core_calendar_get_calendar_upcoming_view",
-      args: { limitnum, offset: 0 },
+      methodname: "core_calendar_get_action_events_by_timesort",
+      args: {
+        limitnum,
+        timesortfrom: nowUnix,
+        timesortto: cutoffUnix,
+        limittononsuspendedevents: true,
+      },
     },
   ];
 
@@ -557,14 +566,21 @@ async function extractViaCalendarAjax(
     if (e["name"]) event.title = truncate(String(e["name"]), 300);
     if (e["modulename"]) event.modtype = String(e["modulename"]);
     if (e["eventtype"]) event.event_type = String(e["eventtype"]);
-    const cmid = e["instance"] ?? e["cmid"];
-    if (cmid) event.cmid = Number(cmid);
     if (e["id"]) event.event_id = Number(e["id"]);
     if (e["timestart"]) event.due_at_unix = Number(e["timestart"]);
     const course = e["course"] as Record<string, unknown> | undefined;
     if (course?.["id"]) event.course_id = Number(course["id"]);
     if (course?.["fullname"]) event.course_name = truncate(String(course["fullname"]), 200);
-    if (e["url"]) event.url = absoluteUrl(baseUrl, String(e["url"]));
+
+    // Activity-URL liegt bei action_events_by_timesort unter action.url,
+    // bei einigen Moodle-Versionen direkt unter url. cmid aus URL extrahieren.
+    const action = e["action"] as Record<string, unknown> | undefined;
+    const rawUrl = (action?.["url"] as string | undefined) ?? (e["url"] as string | undefined);
+    if (rawUrl) {
+      event.url = absoluteUrl(baseUrl, rawUrl);
+      const cmid = cmidFromUrl(rawUrl);
+      if (cmid) event.cmid = cmid;
+    }
     return event;
   });
 }
