@@ -114,18 +114,15 @@ test("fallback: liefert immer parser_degraded:true, auch für bekannte Seiten", 
 // ------------------------------------------------------------------
 // parseTimeline: Throw-Verhalten
 // ------------------------------------------------------------------
-test("parseTimeline: wirft LearnwebParseError wenn Container fehlt", async () => {
-  const session = fakeSession(
-    readFixture("timeline-empty-degraded.html"),
-    "/calendar/view.php?view=upcoming"
-  );
-  await assert.rejects(
-    () => parseTimeline(session, {}),
-    (err) => {
-      assert.ok(err instanceof LearnwebParseError, `Erwartet LearnwebParseError, bekam ${err?.name}`);
-      return true;
-    }
-  );
+test("parseTimeline: Container fehlt, AJAX auch leer → gibt { events: [] } zurück", async () => {
+  // Moodle 4.x live: kein Container im HTML, AJAX-API gibt ebenfalls keine Events.
+  const emptyAjax = [{ error: false, data: { events: [] } }];
+  const session = fakeSessionWithAjax({
+    getHtml: readFixture("timeline-empty-degraded.html"),
+    ajaxBody: emptyAjax,
+  });
+  const result = await parseTimeline(session, {});
+  assert.deepEqual(result.content.events, []);
 });
 
 test("parseTimeline: wirft LearnwebUpstreamError bei non-2xx Response", async () => {

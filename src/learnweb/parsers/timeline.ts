@@ -119,27 +119,22 @@ export async function parseTimeline(
     events = extractCalendarMonthEvents($, baseUrl);
   }
 
-  const containerExists = $(UPCOMING_CONTAINER).length > 0;
-
   if (events.length === 0) {
-    if (containerExists) {
-      // Container ist da, aber leer — Moodle 4.x rendert Events per JS.
-      // AJAX-API fragen; wenn auch dort 0 Events → legitimerweise leerer Kalender.
-      events = await extractViaCalendarAjax(session, window_days);
-      if (events.length === 0) {
-        return { content: { events: [], window_days, fetched_at } };
-      }
-    } else {
-      // Container fehlt komplett → struktureller Parse-Fehler mit Diagnostics.
+    // HTML liefert keine Events — Moodle 4.x rendert sie per JavaScript
+    // (Container kann vorhanden-aber-leer ODER komplett absent sein).
+    // Immer AJAX als primäre Quelle fragen.
+    events = await extractViaCalendarAjax(session, window_days);
+
+    if (events.length === 0) {
+      // Wenn AJAX auch nichts liefert: Diagnostics loggen und [] zurückgeben.
+      // (Kann legitim leer sein, oder AJAX-Response-Format hat sich geändert.)
       const diagnostics = await buildDiagnostics(session, $, resp, UPCOMING_CONTAINER, {
+        container_present: $(UPCOMING_CONTAINER).length,
         "event-list-item": $('li[data-region="event-list-item"]').length,
         "event-item": $('li[data-region="event-item"]').length,
       });
-      console.error(JSON.stringify({ event: "timeline_parse_degraded", ...diagnostics }));
-      throw new LearnwebParseError(
-        "Timeline events could not be extracted from upcoming view (container missing).",
-        diagnostics
-      );
+      console.error(JSON.stringify({ event: "timeline_ajax_empty", ...diagnostics }));
+      return { content: { events: [], window_days, fetched_at } };
     }
   }
 
