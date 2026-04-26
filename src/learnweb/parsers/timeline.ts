@@ -491,12 +491,24 @@ async function extractViaCalendarAjax(
     },
   ];
 
-  const resp = await session.postJson(
-    `${wwwroot}/lib/ajax/service.php?sesskey=${encodeURIComponent(sesskey)}`,
-    payload
-  );
+  const ajaxUrl = `${wwwroot}/lib/ajax/service.php?sesskey=${encodeURIComponent(sesskey)}`;
+  const resp = await session.postJson(ajaxUrl, payload);
+
+  // Diagnostik: bei jedem Schritt loggen, damit Live-Probleme nachvollziehbar sind.
+  // Niemals sesskey, Cookies oder Credentials loggen.
+  const logCtx = (extra: Record<string, unknown>) =>
+    JSON.stringify({
+      event: "timeline_ajax_diagnostic",
+      url: ajaxUrl.replace(/sesskey=[^&]+/, "sesskey=REDACTED"),
+      http_status: resp.status,
+      content_type: resp.headers["content-type"],
+      body_length: resp.data?.length,
+      body_snippet: String(resp.data ?? "").slice(0, 500),
+      ...extra,
+    });
 
   if (resp.status < 200 || resp.status >= 300) {
+    console.error(logCtx({ stage: "non_2xx" }));
     throw new LearnwebUpstreamError(
       `Moodle AJAX service returned ${resp.status}.`,
       { http_status: resp.status, url: resp.url, timestamp: new Date().toISOString() }
@@ -507,12 +519,14 @@ async function extractViaCalendarAjax(
   try {
     parsed = JSON.parse(resp.data);
   } catch {
+    console.error(logCtx({ stage: "invalid_json" }));
     throw new LearnwebParseError("AJAX response is not valid JSON.", {
       body_snippet: String(resp.data).slice(0, 500),
     });
   }
 
   if (!Array.isArray(parsed) || !parsed[0]) {
+    console.error(logCtx({ stage: "unexpected_shape", parsed_type: typeof parsed }));
     throw new LearnwebParseError("AJAX response has unexpected shape.");
   }
 
@@ -523,6 +537,7 @@ async function extractViaCalendarAjax(
   };
 
   if (result.error || result.exception) {
+    console.error(logCtx({ stage: "ajax_error", exception: result.exception }));
     throw new LearnwebParseError(
       `Moodle AJAX error: ${result.exception?.message ?? "unknown"}.`,
       { ajax_exception: result.exception }
@@ -531,6 +546,7 @@ async function extractViaCalendarAjax(
 
   const rawEvents = result.data?.events;
   if (!Array.isArray(rawEvents)) {
+    console.error(logCtx({ stage: "missing_events", result_keys: Object.keys(result) }));
     throw new LearnwebParseError("AJAX response missing data.events array.");
   }
 
