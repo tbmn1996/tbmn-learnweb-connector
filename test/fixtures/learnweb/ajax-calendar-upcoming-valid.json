@@ -1,0 +1,35 @@
+[
+  {
+    "error": false,
+    "data": {
+      "events": [
+        {
+          "id": 12345,
+          "name": "OR Level 2",
+          "eventtype": "due",
+          "timestart": 1777716000,
+          "modulename": "quiz",
+          "instance": 42001,
+          "course": {
+            "id": 67890,
+            "fullname": "Operations Research"
+          },
+          "url": "/mod/quiz/view.php?id=42001"
+        },
+        {
+          "id": 12346,
+          "name": "Hausarbeit abgeben",
+          "eventtype": "due",
+          "timestart": 1778889540,
+          "modulename": "assign",
+          "instance": 42002,
+          "course": {
+            "id": 67891,
+            "fullname": "Wirtschaftsrecht"
+          },
+          "url": "/mod/assign/view.php?id=42002"
+        }
+      ]
+    }
+  }
+]

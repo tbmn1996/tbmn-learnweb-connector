@@ -123,19 +123,24 @@ export async function parseTimeline(
 
   if (events.length === 0) {
     if (containerExists) {
-      // Container vorhanden → legitim leerer Kalender.
-      return { content: { events: [], window_days, fetched_at } };
+      // Container ist da, aber leer — Moodle 4.x rendert Events per JS.
+      // AJAX-API fragen; wenn auch dort 0 Events → legitimerweise leerer Kalender.
+      events = await extractViaCalendarAjax(session, window_days);
+      if (events.length === 0) {
+        return { content: { events: [], window_days, fetched_at } };
+      }
+    } else {
+      // Container fehlt komplett → struktureller Parse-Fehler mit Diagnostics.
+      const diagnostics = await buildDiagnostics(session, $, resp, UPCOMING_CONTAINER, {
+        "event-list-item": $('li[data-region="event-list-item"]').length,
+        "event-item": $('li[data-region="event-item"]').length,
+      });
+      console.error(JSON.stringify({ event: "timeline_parse_degraded", ...diagnostics }));
+      throw new LearnwebParseError(
+        "Timeline events could not be extracted from upcoming view (container missing).",
+        diagnostics
+      );
     }
-    // Container fehlt → Parse-Fehler mit Diagnostics.
-    const diagnostics = await buildDiagnostics(session, $, resp, UPCOMING_CONTAINER, {
-      "event-list-item": $('li[data-region="event-list-item"]').length,
-      "event-item": $('li[data-region="event-item"]').length,
-    });
-    console.error(JSON.stringify({ event: "timeline_parse_degraded", ...diagnostics }));
-    throw new LearnwebParseError(
-      "Timeline events could not be extracted from upcoming view (container missing).",
-      diagnostics
-    );
   }
 
   // Filter course_id / event_type.
@@ -466,6 +471,88 @@ function extractCalendarMonthDayEvents(
   });
 
   return events;
+}
+
+/**
+ * Holt Upcoming-Events über die interne Moodle-AJAX-API.
+ * Wird aufgerufen wenn der HTML-Container vorhanden, aber leer ist
+ * (Moodle 4.x rendert Events per JavaScript, nicht per Server-HTML).
+ */
+async function extractViaCalendarAjax(
+  session: LearnwebSession,
+  window_days: number
+): Promise<TimelineEvent[]> {
+  const sesskey = await session.getSesskey();
+  // Großzügige Schätzung: window_days * 3, mind. 50, max. 200.
+  const limitnum = Math.min(Math.max(window_days * 3, 50), 200);
+  const payload = [
+    {
+      index: 0,
+      methodname: "core_calendar_get_calendar_upcoming_view",
+      args: { limitnum, offset: 0 },
+    },
+  ];
+
+  const resp = await session.postJson(
+    `/lib/ajax/service.php?sesskey=${encodeURIComponent(sesskey)}`,
+    payload
+  );
+
+  if (resp.status < 200 || resp.status >= 300) {
+    throw new LearnwebUpstreamError(
+      `Moodle AJAX service returned ${resp.status}.`,
+      { http_status: resp.status, url: resp.url, timestamp: new Date().toISOString() }
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(resp.data);
+  } catch {
+    throw new LearnwebParseError("AJAX response is not valid JSON.", {
+      body_snippet: String(resp.data).slice(0, 500),
+    });
+  }
+
+  if (!Array.isArray(parsed) || !parsed[0]) {
+    throw new LearnwebParseError("AJAX response has unexpected shape.");
+  }
+
+  const result = parsed[0] as {
+    error?: boolean;
+    exception?: { message?: string };
+    data?: { events?: unknown[] };
+  };
+
+  if (result.error || result.exception) {
+    throw new LearnwebParseError(
+      `Moodle AJAX error: ${result.exception?.message ?? "unknown"}.`,
+      { ajax_exception: result.exception }
+    );
+  }
+
+  const rawEvents = result.data?.events;
+  if (!Array.isArray(rawEvents)) {
+    throw new LearnwebParseError("AJAX response missing data.events array.");
+  }
+
+  const baseUrl = session.getBaseUrl();
+  return rawEvents.map((raw: unknown): TimelineEvent => {
+    const e = raw as Record<string, unknown>;
+    const event: TimelineEvent = {};
+    if (e["name"]) event.title = truncate(String(e["name"]), 300);
+    if (e["modulename"]) event.modtype = String(e["modulename"]);
+    if (e["eventtype"]) event.event_type = String(e["eventtype"]);
+    const cmid = e["instance"] ?? e["cmid"];
+    if (cmid) event.cmid = Number(cmid);
+    if (e["id"]) event.event_id = Number(e["id"]);
+    if (e["timestart"]) event.due_at_unix = Number(e["timestart"]);
+    const course = e["course"] as Record<string, unknown> | undefined;
+    if (course?.["id"]) event.course_id = Number(course["id"]);
+    if (course?.["fullname"]) event.course_name = truncate(String(course["fullname"]), 200);
+    if (e["url"]) event.url = absoluteUrl(baseUrl, String(e["url"]));
+    return event;
+  });
 }
 
 function clampWindow(w: number | undefined): number {

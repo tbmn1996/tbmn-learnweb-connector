@@ -110,6 +110,9 @@ export class LearnwebSession {
   // Throttle zwischen getrennten Tool-Calls.
   private lastRequestAt = 0;
 
+  // Gecachter sesskey — wird bei Re-Auth invalidiert.
+  private sesskey: string | null = null;
+
   private constructor(baseUrl: string, username: string, password: string) {
     this.baseUrl = baseUrl;
     this.username = username;
@@ -165,6 +168,58 @@ export class LearnwebSession {
   public async hasMoodleCookie(): Promise<boolean> {
     const cookies = await this.jar.getCookies(this.baseUrl);
     return cookies.some((c) => c.key.toLowerCase().startsWith("moodlesession"));
+  }
+
+  /**
+   * Liefert den Moodle-sesskey (CSRF-Token) für AJAX-Calls.
+   * Wird lazy vom Dashboard `/my/index.php` geholt und bis zum nächsten
+   * Re-Auth gecacht, da der sesskey Session-gebunden ist.
+   */
+  public async getSesskey(): Promise<string> {
+    if (this.sesskey) return this.sesskey;
+
+    const resp = await this.get("/my/index.php");
+    const $ = cheerio.load(resp.data);
+
+    // Primär: verstecktes Input-Feld (z.B. in Formular-Elementen).
+    let key = $('input[name="sesskey"]').first().attr("value") ?? "";
+
+    // Fallback: M.cfg-Inline-JS, das Moodle auf allen Seiten einbettet.
+    if (!key) {
+      const match = /"sesskey":"([^"]+)"/.exec(resp.data);
+      if (match) key = match[1];
+    }
+
+    if (!key) {
+      throw new LearnwebAuthError("Could not extract sesskey from Moodle dashboard.");
+    }
+
+    this.sesskey = key;
+    return key;
+  }
+
+  /**
+   * POST mit JSON-Body. Wird für Moodle AJAX-Endpoints benötigt.
+   * Nutzt dieselbe Session/Cookie-Jar wie `get()`.
+   * Throttle und Semaphore liegen beim Caller.
+   */
+  public async postJson(path: string, body: unknown): Promise<LearnwebResponse> {
+    try {
+      const resp = await this.client.post(path, JSON.stringify(body), {
+        headers: { "Content-Type": "application/json" },
+      });
+      return {
+        status: resp.status,
+        url: resp.request?.res?.responseUrl ?? this.resolveUrl(path),
+        headers: normalizeHeaders(resp.headers),
+        data: typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data ?? ""),
+      };
+    } catch (error) {
+      if (isAxiosTimeoutError(error)) {
+        throw new LearnwebTimeoutError();
+      }
+      throw error;
+    }
   }
 
   /**
@@ -273,8 +328,9 @@ export class LearnwebSession {
       return this.loginPromise;
     }
     if (force) {
-      // Bei erzwungenem Login (nach Session-Expiry) alten Jar-State verwerfen.
+      // Bei erzwungenem Login (nach Session-Expiry) alten Jar-State + sesskey verwerfen.
       await this.jar.removeAllCookies();
+      this.sesskey = null;
     }
     this.loginPromise = this.doLogin().finally(() => {
       this.loginPromise = null;

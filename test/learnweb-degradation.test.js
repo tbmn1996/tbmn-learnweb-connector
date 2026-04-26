@@ -163,3 +163,99 @@ test("parseCalendarMonth: wirft LearnwebParseError wenn Container fehlt", async 
     }
   );
 });
+
+// ------------------------------------------------------------------
+// extractViaCalendarAjax: AJAX-Fallback bei leerem Moodle-4.x-Skeleton
+// ------------------------------------------------------------------
+
+/** Erstellt eine FakeSession mit separaten Antworten für GET und POST (AJAX). */
+function fakeSessionWithAjax({ getHtml, ajaxStatus = 200, ajaxBody }) {
+  return {
+    getBaseUrl: () => BASE_URL,
+    async hasMoodleCookie() { return true; },
+    async getSesskey() { return "testsesskey123"; },
+    async get(p) {
+      return { status: 200, url: BASE_URL + p, headers: {}, data: getHtml };
+    },
+    async postJson(p, _body) {
+      return {
+        status: ajaxStatus,
+        url: BASE_URL + p,
+        headers: {},
+        data: typeof ajaxBody === "string" ? ajaxBody : JSON.stringify(ajaxBody),
+      };
+    },
+  };
+}
+
+const AJAX_VALID = JSON.parse(
+  fs.readFileSync(path.join(FIXTURES, "ajax-calendar-upcoming-valid.json"), "utf8")
+);
+
+test("parseTimeline: Moodle-4.x-Skeleton (Container leer) → AJAX liefert Events", async () => {
+  const session = fakeSessionWithAjax({
+    getHtml: readFixture("timeline-container-empty.html"),
+    ajaxBody: AJAX_VALID,
+  });
+  const result = await parseTimeline(session, {});
+  assert.ok(result.content.events.length > 0, "Erwartet Events aus AJAX");
+  const first = result.content.events[0];
+  assert.equal(first.modtype, "quiz");
+  assert.equal(first.course_id, 67890);
+  assert.equal(first.event_type, "due");
+});
+
+test("parseTimeline: Moodle-4.x-Skeleton → AJAX liefert leere Events-Liste → { events: [] }", async () => {
+  const emptyAjax = [{ error: false, data: { events: [] } }];
+  const session = fakeSessionWithAjax({
+    getHtml: readFixture("timeline-container-empty.html"),
+    ajaxBody: emptyAjax,
+  });
+  const result = await parseTimeline(session, {});
+  assert.deepEqual(result.content.events, []);
+});
+
+test("parseTimeline: AJAX non-2xx → wirft LearnwebUpstreamError", async () => {
+  const session = fakeSessionWithAjax({
+    getHtml: readFixture("timeline-container-empty.html"),
+    ajaxStatus: 500,
+    ajaxBody: "",
+  });
+  await assert.rejects(
+    () => parseTimeline(session, {}),
+    (err) => {
+      assert.ok(err instanceof LearnwebUpstreamError, `Erwartet LearnwebUpstreamError, bekam ${err?.name}`);
+      return true;
+    }
+  );
+});
+
+test("parseTimeline: AJAX exception in Response → wirft LearnwebParseError", async () => {
+  const ajaxError = [{ error: true, exception: { message: "invalid sesskey" } }];
+  const session = fakeSessionWithAjax({
+    getHtml: readFixture("timeline-container-empty.html"),
+    ajaxBody: ajaxError,
+  });
+  await assert.rejects(
+    () => parseTimeline(session, {}),
+    (err) => {
+      assert.ok(err instanceof LearnwebParseError, `Erwartet LearnwebParseError, bekam ${err?.name}`);
+      return true;
+    }
+  );
+});
+
+test("parseTimeline: AJAX fehlendes data.events → wirft LearnwebParseError", async () => {
+  const ajaxMalformed = [{ error: false, data: {} }];
+  const session = fakeSessionWithAjax({
+    getHtml: readFixture("timeline-container-empty.html"),
+    ajaxBody: ajaxMalformed,
+  });
+  await assert.rejects(
+    () => parseTimeline(session, {}),
+    (err) => {
+      assert.ok(err instanceof LearnwebParseError, `Erwartet LearnwebParseError, bekam ${err?.name}`);
+      return true;
+    }
+  );
+});
