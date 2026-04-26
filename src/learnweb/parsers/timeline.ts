@@ -481,8 +481,9 @@ async function extractViaCalendarAjax(
   // wwwroot aus gecachtem Moodle-M.cfg verwenden damit die URL auch bei
   // Sub-Path-Deployments korrekt ist (z.B. /LearnWeb/learnweb2/lib/ajax/...).
   const wwwroot = session.getMoodleWwwroot();
-  // Großzügige Schätzung: window_days * 3, mind. 50, max. 200.
-  const limitnum = Math.min(Math.max(window_days * 3, 50), 200);
+  // Moodle akzeptiert max. 50 in dieser API. Wir holen einfach immer das Maximum
+  // und filtern später per timesortto/window_days clientseitig.
+  const limitnum = 50;
   // core_calendar_get_action_events_by_timesort liefert strukturierte Events
   // (das ist die API hinter Moodles Timeline-Block).
   const nowUnix = Math.floor(Date.now() / 1000);
