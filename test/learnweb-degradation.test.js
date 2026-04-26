@@ -169,6 +169,7 @@ test("parseCalendarMonth: wirft LearnwebParseError wenn Container fehlt", async 
 function fakeSessionWithAjax({ getHtml, ajaxStatus = 200, ajaxBody }) {
   return {
     getBaseUrl: () => BASE_URL,
+    getMoodleWwwroot: () => BASE_URL,
     async hasMoodleCookie() { return true; },
     async getSesskey() { return "testsesskey123"; },
     async get(p) {
@@ -177,7 +178,7 @@ function fakeSessionWithAjax({ getHtml, ajaxStatus = 200, ajaxBody }) {
     async postJson(p, _body) {
       return {
         status: ajaxStatus,
-        url: BASE_URL + p,
+        url: p,
         headers: {},
         data: typeof ajaxBody === "string" ? ajaxBody : JSON.stringify(ajaxBody),
       };

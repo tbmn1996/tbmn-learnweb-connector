@@ -478,6 +478,9 @@ async function extractViaCalendarAjax(
   window_days: number
 ): Promise<TimelineEvent[]> {
   const sesskey = await session.getSesskey();
+  // wwwroot aus gecachtem Moodle-M.cfg verwenden damit die URL auch bei
+  // Sub-Path-Deployments korrekt ist (z.B. /LearnWeb/learnweb2/lib/ajax/...).
+  const wwwroot = session.getMoodleWwwroot();
   // Großzügige Schätzung: window_days * 3, mind. 50, max. 200.
   const limitnum = Math.min(Math.max(window_days * 3, 50), 200);
   const payload = [
@@ -489,7 +492,7 @@ async function extractViaCalendarAjax(
   ];
 
   const resp = await session.postJson(
-    `/lib/ajax/service.php?sesskey=${encodeURIComponent(sesskey)}`,
+    `${wwwroot}/lib/ajax/service.php?sesskey=${encodeURIComponent(sesskey)}`,
     payload
   );
 

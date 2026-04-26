@@ -110,8 +110,9 @@ export class LearnwebSession {
   // Throttle zwischen getrennten Tool-Calls.
   private lastRequestAt = 0;
 
-  // Gecachter sesskey — wird bei Re-Auth invalidiert.
+  // Gecachter sesskey + Moodle-wwwroot — werden bei Re-Auth invalidiert.
   private sesskey: string | null = null;
+  private moodleWwwroot: string | null = null;
 
   private constructor(baseUrl: string, username: string, password: string) {
     this.baseUrl = baseUrl;
@@ -194,8 +195,22 @@ export class LearnwebSession {
       throw new LearnwebAuthError("Could not extract sesskey from Moodle dashboard.");
     }
 
+    // wwwroot cachen — nötig für korrekte AJAX-URLs wenn baseURL nur den Domain-Root hat.
+    const wwwrootMatch = /"wwwroot":"([^"]+)"/.exec(resp.data);
+    if (wwwrootMatch) {
+      this.moodleWwwroot = wwwrootMatch[1].replace(/\\\//g, "/");
+    }
+
     this.sesskey = key;
     return key;
+  }
+
+  /**
+   * Liefert die Moodle-wwwroot (z.B. "https://www.uni-muenster.de/LearnWeb/learnweb2").
+   * Muss nach getSesskey() gecacht sein; Fallback ist baseUrl.
+   */
+  public getMoodleWwwroot(): string {
+    return this.moodleWwwroot ?? this.baseUrl;
   }
 
   /**
@@ -331,6 +346,7 @@ export class LearnwebSession {
       // Bei erzwungenem Login (nach Session-Expiry) alten Jar-State + sesskey verwerfen.
       await this.jar.removeAllCookies();
       this.sesskey = null;
+      this.moodleWwwroot = null;
     }
     this.loginPromise = this.doLogin().finally(() => {
       this.loginPromise = null;
