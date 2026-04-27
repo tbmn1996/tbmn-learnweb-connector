@@ -1,0 +1,9 @@
+[
+  {
+    "error": true,
+    "exception": {
+      "message": "Invalid session key",
+      "errorcode": "invalidsesskey"
+    }
+  }
+]

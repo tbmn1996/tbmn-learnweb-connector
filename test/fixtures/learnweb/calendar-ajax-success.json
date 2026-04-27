@@ -1,0 +1,37 @@
+[
+  {
+    "error": false,
+    "data": {
+      "events": [
+        {
+          "id": 9201,
+          "name": "Event A",
+          "eventtype": "due",
+          "timestart": 1778835600,
+          "modulename": "assign",
+          "instance": 4101,
+          "course": {
+            "id": 7101,
+            "fullname": "Course A"
+          },
+          "action": {
+            "url": "/mod/assign/view.php?id=4101"
+          }
+        },
+        {
+          "id": 9202,
+          "name": "Event B",
+          "eventtype": "open",
+          "timestart": 1779271200,
+          "modulename": "quiz",
+          "instance": 4102,
+          "course": {
+            "id": 7102,
+            "fullname": "Course B"
+          },
+          "url": "/mod/quiz/view.php?id=4102"
+        }
+      ]
+    }
+  }
+]

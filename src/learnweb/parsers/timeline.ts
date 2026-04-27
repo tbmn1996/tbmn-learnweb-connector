@@ -52,10 +52,14 @@ const MAX_WINDOW = 90;
 
 const UPCOMING_CONTAINER = '[data-region="event-list-content"]';
 const MONTH_CONTAINER = ".calendarwrapper";
+const MONTH_EVENT_ANCHOR_SELECTOR =
+  '[data-region="day"] a[data-action="view-event"], ' +
+  '[data-region="day"] a[data-action="event-action-view"], ' +
+  '[data-region="day"] a[href*="/mod/"]';
 
 // --- Diagnostik-Helper ---
 
-async function buildDiagnostics(
+export async function buildDiagnostics(
   session: LearnwebSession,
   $: cheerio.CheerioAPI,
   resp: { status: number; url: string; data: string },
@@ -85,6 +89,47 @@ async function buildDiagnostics(
     },
     page_hash: pageHash,
   };
+}
+
+function applyUnixDate(event: TimelineEvent, timestamp: number): void {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return;
+  event.due_at_unix = timestamp;
+  event.due_at = new Date(timestamp * 1000).toISOString();
+}
+
+function applyUnixDateFromString(event: TimelineEvent, raw: string | undefined): void {
+  if (!raw) return;
+  const timestamp = parseInt(raw, 10);
+  if (!Number.isNaN(timestamp)) {
+    applyUnixDate(event, timestamp);
+  }
+}
+
+function applyDateFromYmd(
+  event: TimelineEvent,
+  year: string | undefined,
+  month: string | undefined,
+  day: string | undefined
+): void {
+  if (!year || !month || !day) return;
+  const y = parseInt(year, 10);
+  const m = parseInt(month, 10);
+  const d = parseInt(day, 10);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return;
+  const timestamp = Math.floor(Date.UTC(y, m - 1, d, 0, 0, 0) / 1000);
+  applyUnixDate(event, timestamp);
+}
+
+function logMissingCalendarEventDate(event: TimelineEvent): void {
+  if (event.due_at_unix != null || event.due_at) return;
+  console.error(
+    JSON.stringify({
+      event: "calendar_month_event_missing_date",
+      title: event.title,
+      cmid: event.cmid,
+      event_id: event.event_id,
+    })
+  );
 }
 
 // --- parseTimeline ---
@@ -291,10 +336,7 @@ function extractEventItems(
     const tsStr =
       $li.find("[data-timestamp]").first().attr("data-timestamp") ??
       $li.closest("[data-timestamp]").attr("data-timestamp");
-    if (tsStr) {
-      const ts = parseInt(tsStr, 10);
-      if (!Number.isNaN(ts)) event.due_at_unix = ts;
-    }
+    applyUnixDateFromString(event, tsStr);
 
     const courseName = normalizeText($li.find(".coursename, .course-name").first().text());
     if (courseName) event.course_name = truncate(courseName, 200);
@@ -330,26 +372,22 @@ function extractCalendarMonthEvents(
     const eventIdStr = $li.attr("data-event-id");
     if (eventIdStr) event.event_id = parseInt(eventIdStr, 10) || undefined;
 
-    const $a = $li.find("a[data-action='view-event'], a[href*='/mod/']").first();
+    const $a = $li.find("a[data-action='view-event'], a[data-action='event-action-view'], a[href*='/mod/']").first();
     const tsStr =
       $a.attr("data-timestamp") ??
+      $a.closest("[data-day-timestamp]").attr("data-day-timestamp") ??
+      $li.attr("data-day-timestamp") ??
       $li.closest("[data-timestamp]").attr("data-timestamp");
-    if (tsStr) {
-      const ts = parseInt(tsStr, 10);
-      if (!Number.isNaN(ts)) event.due_at_unix = ts;
+    applyUnixDateFromString(event, tsStr);
+
+    if (!event.due_at_unix) {
+      const $day = $li.closest("[data-region='day']");
+      applyUnixDateFromString(event, $day.attr("data-day-timestamp"));
     }
 
     if (!event.due_at_unix) {
       const $day = $li.closest("[data-region='day']");
-      const y = $day.attr("data-year");
-      const m = $day.attr("data-month");
-      const d = $day.attr("data-day");
-      if (y && m && d) {
-        const dateStr = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-        event.due_at = dateStr;
-        const parsed = new Date(dateStr);
-        if (!Number.isNaN(parsed.getTime())) event.due_at_unix = Math.floor(parsed.getTime() / 1000);
-      }
+      applyDateFromYmd(event, $day.attr("data-year"), $day.attr("data-month"), $day.attr("data-day"));
     }
 
     const titleText =
@@ -379,7 +417,10 @@ function extractCalendarMonthEvents(
     );
     if (courseName) event.course_name = truncate(courseName, 200);
 
-    if (event.title) events.push(event);
+    if (event.title) {
+      logMissingCalendarEventDate(event);
+      events.push(event);
+    }
   });
 
   return events;
@@ -395,9 +436,10 @@ function extractCalendarMonthDayEvents(
 ): TimelineEvent[] {
   const events: TimelineEvent[] = [];
 
-  $('[data-region="day"] a[data-action="view-event"]').each((_, a) => {
+  $(MONTH_EVENT_ANCHOR_SELECTOR).each((_, a) => {
     const $a = $(a);
     const $li = $a.closest("li");
+    const $td = $a.closest("td");
     const event: TimelineEvent = {};
 
     const component = $li.attr("data-event-component") ?? "";
@@ -415,23 +457,15 @@ function extractCalendarMonthDayEvents(
     const tsStr =
       $a.attr("data-timestamp") ??
       $a.closest("[data-timestamp]").attr("data-timestamp") ??
-      $li.attr("data-timestamp");
-    if (tsStr) {
-      const ts = parseInt(tsStr, 10);
-      if (!Number.isNaN(ts)) event.due_at_unix = ts;
-    }
+      $li.attr("data-timestamp") ??
+      $a.closest("[data-day-timestamp]").attr("data-day-timestamp") ??
+      $li.attr("data-day-timestamp") ??
+      $td.attr("data-day-timestamp");
+    applyUnixDateFromString(event, tsStr);
 
     if (!event.due_at_unix) {
       const $day = $a.closest("[data-region='day']");
-      const y = $day.attr("data-year");
-      const m = $day.attr("data-month");
-      const d = $day.attr("data-day");
-      if (y && m && d) {
-        const dateStr = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-        event.due_at = dateStr;
-        const parsed = new Date(dateStr);
-        if (!Number.isNaN(parsed.getTime())) event.due_at_unix = Math.floor(parsed.getTime() / 1000);
-      }
+      applyDateFromYmd(event, $day.attr("data-year"), $day.attr("data-month"), $day.attr("data-day"));
     }
 
     const titleText =
@@ -455,14 +489,16 @@ function extractCalendarMonthDayEvents(
       event.course_id = parseInt(dataCourseId, 10) || undefined;
     }
 
-    const $td = $a.closest("td");
     const ariaLabel = $td.attr("aria-label");
     const courseName =
       normalizeText($li.find(".coursename").text()) ||
       (ariaLabel ? truncate(normalizeText(ariaLabel), 200) : "");
     if (courseName) event.course_name = courseName;
 
-    if (event.title) events.push(event);
+    if (event.title) {
+      logMissingCalendarEventDate(event);
+      events.push(event);
+    }
   });
 
   return events;
@@ -502,6 +538,15 @@ async function extractViaCalendarAjax(
   ];
 
   const ajaxUrl = `${wwwroot}/lib/ajax/service.php?sesskey=${encodeURIComponent(sesskey)}`;
+  console.error(
+    JSON.stringify({
+      event: "timeline_ajax_attempt",
+      methodname: "core_calendar_get_action_events_by_timesort",
+      window_days,
+      limitnum,
+      url: ajaxUrl.replace(/sesskey=[^&]+/, "sesskey=REDACTED"),
+    })
+  );
   const resp = await session.postJson(ajaxUrl, payload);
 
   // Diagnostik: bei jedem Schritt loggen, damit Live-Probleme nachvollziehbar sind.
@@ -568,7 +613,7 @@ async function extractViaCalendarAjax(
     if (e["modulename"]) event.modtype = String(e["modulename"]);
     if (e["eventtype"]) event.event_type = String(e["eventtype"]);
     if (e["id"]) event.event_id = Number(e["id"]);
-    if (e["timestart"]) event.due_at_unix = Number(e["timestart"]);
+    if (e["timestart"]) applyUnixDate(event, Number(e["timestart"]));
     const course = e["course"] as Record<string, unknown> | undefined;
     if (course?.["id"]) event.course_id = Number(course["id"]);
     if (course?.["fullname"]) event.course_name = truncate(String(course["fullname"]), 200);

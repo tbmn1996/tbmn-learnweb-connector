@@ -10,3 +10,4 @@ logs/
 # Live-Recon-Dumps von Learnweb (enthalten PII, dürfen nie committed werden).
 # Tests nutzen stattdessen die synthetischen Fixtures daneben.
 test/fixtures/learnweb/_live/
+test/fixtures/learnweb/raw/

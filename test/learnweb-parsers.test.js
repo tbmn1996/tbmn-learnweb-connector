@@ -31,6 +31,7 @@ const { parseAssign } = require(path.join(ROOT, "dist/learnweb/parsers/assign"))
 const { parseQuiz } = require(path.join(ROOT, "dist/learnweb/parsers/quiz"));
 const { parseRatingAllocate } = require(path.join(ROOT, "dist/learnweb/parsers/ratingallocate"));
 const { parseTimeline, parseCalendarMonth, _extractForTest: extractTimelineEvents } = require(path.join(ROOT, "dist/learnweb/parsers/timeline"));
+const { LearnwebParseError } = require(path.join(ROOT, "dist/learnweb/session"));
 const { parseFolder } = require(path.join(ROOT, "dist/learnweb/parsers/folder"));
 const { parseWorkshop } = require(path.join(ROOT, "dist/learnweb/parsers/workshop"));
 const { parseLesson } = require(path.join(ROOT, "dist/learnweb/parsers/lesson"));
@@ -63,6 +64,26 @@ function fakeSession(pathToHtml) {
         url: BASE_URL + p,
         headers: {},
         data: html,
+      };
+    },
+  };
+}
+
+function fakeSessionWithAjax({ getHtml, ajaxStatus = 200, ajaxBody }) {
+  return {
+    getBaseUrl: () => BASE_URL,
+    getMoodleWwwroot: () => BASE_URL,
+    async hasMoodleCookie() { return true; },
+    async getSesskey() { return "testsesskey123"; },
+    async get() {
+      return { status: 200, url: BASE_URL + "/calendar/view.php?view=upcoming", headers: {}, data: getHtml };
+    },
+    async postJson(p, _body) {
+      return {
+        status: ajaxStatus,
+        url: p,
+        headers: { "content-type": "application/json" },
+        data: typeof ajaxBody === "string" ? ajaxBody : JSON.stringify(ajaxBody),
       };
     },
   };
@@ -439,6 +460,40 @@ test("parseTimeline: filtert nach event_type", async () => {
   assert.ok(result.content.events.every((e) => e.event_type == null || e.event_type === "due"));
 });
 
+test("parseTimeline: AJAX-Success-Fixture liefert datierte Events", async () => {
+  const session = fakeSessionWithAjax({
+    getHtml: readFixture("timeline-container-empty.html"),
+    ajaxBody: readFixture("calendar-ajax-success.json"),
+  });
+
+  const result = await parseTimeline(session, { window_days: 90 });
+
+  assert.ok(result.content.events.length >= 1, "Mindestens 1 AJAX-Event erwartet");
+  const first = result.content.events[0];
+  assert.equal(first.due_at_unix, 1778835600);
+  assert.equal(first.due_at, "2026-05-15T09:00:00.000Z");
+  assert.equal(first.title, "Event A");
+  assert.equal(first.course_name, "Course A");
+  assert.equal(first.course_id, 7101);
+  assert.ok(first.url?.endsWith("/mod/assign/view.php?id=4101"));
+});
+
+test("parseTimeline: AJAX-Error-Fixture bleibt intern diagnostizierbar", async () => {
+  const session = fakeSessionWithAjax({
+    getHtml: readFixture("timeline-container-empty.html"),
+    ajaxBody: readFixture("calendar-ajax-error-shape.json"),
+  });
+
+  await assert.rejects(
+    () => parseTimeline(session, { window_days: 90 }),
+    (err) => {
+      assert.ok(err instanceof LearnwebParseError, `Erwartet LearnwebParseError, bekam ${err?.name}`);
+      assert.equal(err.diagnostics?.ajax_exception?.errorcode, "invalidsesskey");
+      return true;
+    }
+  );
+});
+
 // ------------------------------------------------------------------
 // parseCalendarMonth
 // ------------------------------------------------------------------
@@ -476,6 +531,25 @@ test("parseCalendarMonth: filtert nach course_id", async () => {
   // Nur Events mit course_id=43 bleiben übrig
   assert.ok(result.content.events.every((e) => e.course_id === 43),
     "Alle Events müssen course_id=43 haben");
+});
+
+test("parseCalendarMonth: liefert due_at_unix und ISO-due_at aus data-day-timestamp", async () => {
+  const html = readFixture("calendar-month-with-events.html");
+  const session = {
+    getBaseUrl: () => BASE_URL,
+    async hasMoodleCookie() { return true; },
+    async get() {
+      return { status: 200, url: BASE_URL + "/calendar/view.php?view=month&time=123", headers: {}, data: html };
+    },
+  };
+
+  const result = await parseCalendarMonth(session, { year: 2026, month: 5 });
+  const first = result.content.events[0];
+
+  assert.equal(first.due_at_unix, 1778835600);
+  assert.equal(first.due_at, "2026-05-15T09:00:00.000Z");
+  assert.equal(first.modtype, "assign");
+  assert.equal(first.event_type, "due");
 });
 
 // ------------------------------------------------------------------
