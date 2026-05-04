@@ -1,13 +1,14 @@
 /**
  * MCP-Tools für Learnweb/Moodle — read-only.
  *
- * Sechs Tools:
+ * Sieben Tools:
  *   1. learnweb-get-courses          → alle Kurse des Users
  *   2. learnweb-get-course-overview  → Struktur eines Kurses
  *   3. learnweb-read-activity        → strukturierter Inhalt einer Aktivität
  *   4. learnweb-get-timeline         → anstehende Aktivitäten (Upcoming-View)
  *   5. learnweb-search-courses       → globale Kurssuche über /course/search.php
- *   6. learnweb-get-calendar-month   → Kalenderansicht für einen Monat
+ *   6. learnweb-get-page             → bereinigter Text einer SSO-geschützten Seite
+ *   7. learnweb-get-calendar-month   → Kalenderansicht für einen Monat
  *
  * Sicherheitsgrenze:
  *   Die Tools werden ausschliesslich registriert, wenn
@@ -18,6 +19,8 @@
  */
 
 import * as cheerio from "cheerio";
+import nodePath from "node:path";
+import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
@@ -44,6 +47,7 @@ import { parseAssign } from "../learnweb/parsers/assign";
 import { parseQuiz } from "../learnweb/parsers/quiz";
 import { parseRatingAllocate } from "../learnweb/parsers/ratingallocate";
 import { parseCalendarMonth, parseTimeline } from "../learnweb/parsers/timeline";
+import { normalizeText, truncate } from "../learnweb/parsers/common";
 import { parseFolder } from "../learnweb/parsers/folder";
 import { parseWorkshop } from "../learnweb/parsers/workshop";
 import { parseLesson } from "../learnweb/parsers/lesson";
@@ -59,6 +63,7 @@ import {
 } from "./shared";
 
 const MODTYPE_RE = /^[a-z_]+$/;
+const SAFE_PATH_RE = /^\/(mod|course|calendar|my|blocks)(\/|$)/;
 const MAX_LIMIT = 25;
 const DEFAULT_LIMIT = 10;
 const SEARCH_DEFAULT_LIMIT = 25;
@@ -143,6 +148,51 @@ function buildSearchTimeoutResult() {
     structuredContent: payload,
     isError: true,
   });
+}
+
+function normalizeLearnwebPath(input: string): string {
+  const queryIndex = input.indexOf("?");
+  const rawPath = queryIndex === -1 ? input : input.slice(0, queryIndex);
+  const query = queryIndex === -1 ? "" : input.slice(queryIndex);
+
+  if (/%2e/i.test(rawPath) || /(^|\/)\.\.(\/|$)/.test(rawPath)) {
+    throw new LearnwebUpstreamError(400, input, "Learnweb path traversal rejected.");
+  }
+
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(rawPath);
+  } catch {
+    throw new LearnwebUpstreamError(400, input, "Learnweb path could not be decoded.");
+  }
+
+  const normalized = nodePath.posix.normalize(decoded);
+  if (!SAFE_PATH_RE.test(normalized) || normalized.includes("..")) {
+    throw new LearnwebUpstreamError(400, input, "Learnweb path is outside the allowed scope.");
+  }
+
+  return normalized + query;
+}
+
+async function getPageViaSession(session: LearnwebSession, rawPath: string) {
+  const safePath = normalizeLearnwebPath(rawPath);
+  const resp = await session.get(safePath);
+  if (resp.status < 200 || resp.status >= 300) {
+    throw new LearnwebUpstreamError(resp.status, rawPath, "Learnweb page request returned non-2xx.");
+  }
+
+  const $ = cheerio.load(resp.data);
+  $("nav, header, footer, .navbar, #nav-drawer, [role='navigation'], script, style, noscript").remove();
+
+  const title = normalizeText($("h1, h2").first().text()) || rawPath;
+  const text = normalizeText($("#region-main, [role='main'], main, body").first().text());
+  return {
+    path: rawPath,
+    title,
+    text: truncate(text, 20000),
+    length: text.length,
+    fetched_at: new Date().toISOString(),
+  };
 }
 
 /**
@@ -424,7 +474,34 @@ export function registerLearnwebTools(server: McpServer, scope?: WorkspaceScope)
   );
 
   // ------------------------------------------------------------------
-  // Tool 6: learnweb-get-calendar-month
+  // Tool 6: learnweb-get-page
+  // ------------------------------------------------------------------
+  registerTool(
+    "learnweb-get-page",
+    {
+      title: "Learnweb: Get Page (SSO Proxy)",
+      description:
+        "Return cleaned text from a SSO-protected Learnweb page. " +
+        "Only paths under /mod, /course, /calendar, /my and /blocks are allowed.",
+      inputSchema: {
+        path: z
+          .string()
+          .regex(SAFE_PATH_RE, "path must be under /mod, /course, /calendar, /my or /blocks")
+          .max(500)
+          .describe("Learnweb path, e.g. /mod/forum/view.php?id=123."),
+      } as ToolInputSchema,
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async ({ path: rawPath }: { path: string }) => {
+      return wrapHandler(async () => {
+        const session = LearnwebSession.getInstance();
+        return getPageViaSession(session, rawPath);
+      });
+    }
+  );
+
+  // ------------------------------------------------------------------
+  // Tool 7: learnweb-get-calendar-month
   // ------------------------------------------------------------------
   registerTool(
     "learnweb-get-calendar-month",
@@ -461,33 +538,49 @@ async function dispatchActivity(
   args: { cmid: number; modtype: string; limit?: number; offset?: number }
 ) {
   const { cmid, modtype, limit, offset } = args;
-  switch (modtype) {
-    case "resource":
-      return { modtype, ...(await parseResource(session, cmid)) };
-    case "url":
-      return { modtype, ...(await parseUrl(session, cmid)) };
-    case "page":
-      return { modtype, ...(await parsePage(session, cmid)) };
-    case "forum":
-      return { modtype, ...(await parseForum(session, cmid, { limit, offset })) };
-    case "assign":
-      return { modtype, ...(await parseAssign(session, cmid)) };
-    case "quiz":
-      return { modtype, ...(await parseQuiz(session, cmid)) };
-    case "ratingallocate":
-      return { modtype, ...(await parseRatingAllocate(session, cmid)) };
-    case "folder":
-      return { modtype, ...(await parseFolder(session, cmid)) };
-    case "workshop":
-      return { modtype, ...(await parseWorkshop(session, cmid)) };
-    case "lesson":
-      return { modtype, ...(await parseLesson(session, cmid)) };
-    case "choice":
-      return { modtype, ...(await parseChoice(session, cmid)) };
-    case "feedback":
-      return { modtype, ...(await parseFeedback(session, cmid)) };
-    default:
-      return { modtype, ...(await parseFallback(session, cmid, modtype)) };
+  try {
+    switch (modtype) {
+      case "resource":
+        return { modtype, ...(await parseResource(session, cmid)) };
+      case "url":
+        return { modtype, ...(await parseUrl(session, cmid)) };
+      case "page":
+        return { modtype, ...(await parsePage(session, cmid)) };
+      case "forum":
+        return { modtype, ...(await parseForum(session, cmid, { limit, offset })) };
+      case "assign":
+        return { modtype, ...(await parseAssign(session, cmid)) };
+      case "quiz":
+        return { modtype, ...(await parseQuiz(session, cmid)) };
+      case "ratingallocate":
+        return { modtype, ...(await parseRatingAllocate(session, cmid)) };
+      case "folder":
+        return { modtype, ...(await parseFolder(session, cmid)) };
+      case "workshop":
+        return { modtype, ...(await parseWorkshop(session, cmid)) };
+      case "lesson":
+        return { modtype, ...(await parseLesson(session, cmid)) };
+      case "choice":
+        return { modtype, ...(await parseChoice(session, cmid)) };
+      case "feedback":
+        return { modtype, ...(await parseFeedback(session, cmid)) };
+      default:
+        return { modtype, ...(await parseFallback(session, cmid, modtype)) };
+    }
+  } catch (err) {
+    if (!(err instanceof LearnwebParseError)) throw err;
+    console.error(`[dispatchActivity] parser_fail modtype=${modtype} cmid=${cmid}: ${err.message}`);
+    const fallback = await parseFallback(session, cmid, modtype);
+    return {
+      modtype,
+      ...fallback,
+      parser_error: {
+        code: "learnweb_parse_error",
+        parser: err.parser ?? modtype,
+        selector: err.selector,
+        message: String(err.message ?? "").slice(0, 200),
+      },
+    };
   }
 }
 
@@ -497,6 +590,7 @@ async function dispatchActivity(
  * oder Session-Cookies im Output.
  */
 async function wrapHandler<T>(fn: () => Promise<T>) {
+  const requestId = `req_${randomUUID().replace(/-/g, "").slice(0, 22)}`;
   try {
     const value = await fn();
     return ok(value as unknown);
@@ -505,20 +599,31 @@ async function wrapHandler<T>(fn: () => Promise<T>) {
     const code =
       err instanceof LearnwebNotConfiguredError ? "learnweb_not_configured"
       : err instanceof LearnwebAuthError        ? "learnweb_auth_error"
+      : err instanceof LearnwebTimeoutError     ? "learnweb_timeout"
       : err instanceof LearnwebParseError       ? "learnweb_parse_error"
       : err instanceof LearnwebUpstreamError    ? "learnweb_upstream_error"
       :                                           "learnweb_error";
     const message =
       err instanceof LearnwebNotConfiguredError ? "Learnweb is not configured on this server."
       : err instanceof LearnwebAuthError        ? "Learnweb authentication failed."
-      : err instanceof LearnwebParseError       ? "Learnweb response could not be parsed."
-      : err instanceof LearnwebUpstreamError    ? "Learnweb upstream returned an error."
+      : err instanceof LearnwebTimeoutError     ? "Learnweb request timed out."
       :                                           "Learnweb request failed.";
+    const context: Record<string, unknown> = {};
+    if (err instanceof LearnwebParseError) {
+      if (err.parser) context.parser = err.parser;
+      if (err.selector) context.selector = err.selector;
+    }
+    if (err instanceof LearnwebUpstreamError) {
+      if (err.status != null) context.status = err.status;
+      if (err.path) context.path = err.path;
+    }
+    console.error(`[${requestId}] ${code}: ${err instanceof Error ? err.message : String(err)}`);
+    const payload = { error: true, code, message, request_id: requestId, context };
     return ok(
-      { error: true, code, message },
+      payload,
       {
-        text: JSON.stringify({ error: true, code, message }),
-        structuredContent: { error: true, code, message },
+        text: JSON.stringify(payload),
+        structuredContent: payload,
         isError: true,
       }
     );
@@ -534,4 +639,8 @@ export const _testing = {
   resetSearchRateLimitForTests,
   analyzeCourseSearchHtml,
   buildSearchTimeoutResult,
+  SAFE_PATH_RE,
+  normalizeLearnwebPath,
+  getPageViaSession,
+  wrapHandler,
 };

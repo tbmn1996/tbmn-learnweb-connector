@@ -36,6 +36,9 @@ raus.
 - Railway-Service: `learnweb-mcp` (Service-ID
   `1e50f1a0-b633-4c68-89bb-af0e848c958f`).
 - Domain: `learnweb-mcp-production.up.railway.app`.
+- Railway CLI ist verfügbar (`railway`). Projekt: „TBMN Cloud Tools", Environment: production.
+  Redeploy: `railway redeploy --service learnweb-mcp --yes`
+  Logs: `railway logs --service learnweb-mcp`
 - Vor Änderungen an `railway.toml`, Env-Vars oder Launchd-Plists **immer
   fragen**, bevor Aktionen ausgeführt werden.
 - Vor `git push` den Commit-Inhalt erklären und bestätigen lassen.

@@ -30,6 +30,16 @@ function readFixture(name) {
   return fs.readFileSync(path.join(FIXTURES, name), "utf8");
 }
 
+async function withFrozenNow(iso, fn) {
+  const originalNow = Date.now;
+  Date.now = () => new Date(iso).getTime();
+  try {
+    return await fn();
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
 function fakeSession(html, requestedPath) {
   return {
     getBaseUrl: () => BASE_URL,
@@ -96,11 +106,18 @@ test("quiz: leere Info-Seite → parser_degraded:true", async () => {
   assert.equal(result.parser_degraded, true);
 });
 
-test("ratingallocate: leere Fixture → parser_degraded:true", async () => {
+test("ratingallocate: leere Fixture → LearnwebParseError", async () => {
   const html = `<html><body><h1>Nichts da</h1></body></html>`;
   const session = fakeSession(html, "/mod/ratingallocate/view.php?id=7777");
-  const result = await parseRatingAllocate(session, 7777);
-  assert.equal(result.parser_degraded, true);
+  await assert.rejects(
+    () => parseRatingAllocate(session, 7777),
+    (err) => {
+      assert.ok(err instanceof LearnwebParseError, `Erwartet LearnwebParseError, bekam ${err?.name}`);
+      assert.equal(err.parser, "ratingallocate");
+      assert.equal(err.selector, ".choicestatustable");
+      return true;
+    }
+  );
 });
 
 test("fallback: liefert immer parser_degraded:true, auch für bekannte Seiten", async () => {
@@ -191,16 +208,18 @@ const AJAX_VALID = JSON.parse(
 );
 
 test("parseTimeline: Moodle-4.x-Skeleton (Container leer) → AJAX liefert Events", async () => {
-  const session = fakeSessionWithAjax({
-    getHtml: readFixture("timeline-container-empty.html"),
-    ajaxBody: AJAX_VALID,
+  await withFrozenNow("2026-04-20T00:00:00.000Z", async () => {
+    const session = fakeSessionWithAjax({
+      getHtml: readFixture("timeline-container-empty.html"),
+      ajaxBody: AJAX_VALID,
+    });
+    const result = await parseTimeline(session, {});
+    assert.ok(result.content.events.length > 0, "Erwartet Events aus AJAX");
+    const first = result.content.events[0];
+    assert.equal(first.modtype, "quiz");
+    assert.equal(first.course_id, 67890);
+    assert.equal(first.event_type, "due");
   });
-  const result = await parseTimeline(session, {});
-  assert.ok(result.content.events.length > 0, "Erwartet Events aus AJAX");
-  const first = result.content.events[0];
-  assert.equal(first.modtype, "quiz");
-  assert.equal(first.course_id, 67890);
-  assert.equal(first.event_type, "due");
 });
 
 test("parseTimeline: Moodle-4.x-Skeleton → AJAX liefert leere Events-Liste → { events: [] }", async () => {
@@ -213,6 +232,36 @@ test("parseTimeline: Moodle-4.x-Skeleton → AJAX liefert leere Events-Liste →
   assert.deepEqual(result.content.events, []);
 });
 
+test("parseTimeline: leere Events loggen genau eine sichere degraded-Zeile", async () => {
+  const originalError = console.error;
+  const lines = [];
+  console.error = (line) => lines.push(String(line));
+  try {
+    const session = fakeSessionWithAjax({
+      getHtml: readFixture("timeline-container-empty.html"),
+      ajaxBody: [{ error: false, data: { events: [] } }],
+    });
+    const result = await parseTimeline(session, {});
+    assert.deepEqual(result.content.events, []);
+  } finally {
+    console.error = originalError;
+  }
+
+  const degraded = lines.filter((line) => line.startsWith("[timeline-degraded] "));
+  assert.equal(degraded.length, 1);
+  const payload = JSON.parse(degraded[0].slice("[timeline-degraded] ".length));
+  assert.deepEqual(Object.keys(payload).sort(), [
+    "ajax_attempted",
+    "html_len",
+    "sel_calendar_block",
+    "sel_event_item",
+    "sel_event_list_item",
+    "sel_mod_links",
+  ]);
+  assert.equal(payload.ajax_attempted, true);
+  assert.ok(!lines.join("\n").includes("body_snippet"));
+});
+
 test("parseTimeline: AJAX non-2xx → wirft LearnwebUpstreamError", async () => {
   const session = fakeSessionWithAjax({
     getHtml: readFixture("timeline-container-empty.html"),
@@ -223,6 +272,8 @@ test("parseTimeline: AJAX non-2xx → wirft LearnwebUpstreamError", async () => 
     () => parseTimeline(session, {}),
     (err) => {
       assert.ok(err instanceof LearnwebUpstreamError, `Erwartet LearnwebUpstreamError, bekam ${err?.name}`);
+      assert.equal(err.status, 500);
+      assert.equal(err.path, "/lib/ajax/service.php");
       return true;
     }
   );
@@ -238,6 +289,8 @@ test("parseTimeline: AJAX exception in Response → wirft LearnwebParseError", a
     () => parseTimeline(session, {}),
     (err) => {
       assert.ok(err instanceof LearnwebParseError, `Erwartet LearnwebParseError, bekam ${err?.name}`);
+      assert.equal(err.parser, "timeline");
+      assert.equal(err.selector, "ajax:core_calendar_get_action_events_by_timesort");
       return true;
     }
   );
@@ -253,6 +306,8 @@ test("parseTimeline: AJAX fehlendes data.events → wirft LearnwebParseError", a
     () => parseTimeline(session, {}),
     (err) => {
       assert.ok(err instanceof LearnwebParseError, `Erwartet LearnwebParseError, bekam ${err?.name}`);
+      assert.equal(err.parser, "timeline");
+      assert.equal(err.selector, "ajax:core_calendar_get_action_events_by_timesort");
       return true;
     }
   );

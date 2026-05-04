@@ -10,13 +10,17 @@
  *     bekannte Labels: Rating ends at, Time remaining,
  *                      Estimated publication date, Your Rating, Your Allocation
  *   "Your Rating"-Zelle enthaelt <ul><li>-Liste der Optionen — diese nehmen
- *   wir als choices[]. Vorrangige (Pre-Rating-)View hat eigene Choice-Tabelle
- *   mit max_size; die haben wir hier nicht gemappt, weil wir sie noch nicht
- *   zuverlaessig sehen (siehe Plan, Phase 5).
+ *   wir als choices[].
+ *
+ * Authoritative Plugin-Quelle learnweb/moodle-mod_ratingallocate:
+ * renderer.php rendert .choicestatustable, .choicesummarytable,
+ * #mod_ratingallocateshowoptions sowie die Labels "Rateable Choices",
+ * "Your Rating" und "Your Allocation".
  */
 
 import * as cheerio from "cheerio";
 import type { LearnwebSession } from "../session";
+import { LearnwebParseError } from "../session";
 import { extractTextFromSelector, normalizeText, truncate } from "./common";
 
 export interface RatingChoice {
@@ -50,6 +54,8 @@ const STATUS_MAP: Record<string, keyof RatingAllocateContent> = {
   "your allocation": "allocation",
 };
 
+const CHOICES_LABELS = new Set(["your rating", "rateable choices"]);
+
 export async function parseRatingAllocate(
   session: LearnwebSession,
   cmid: number
@@ -68,6 +74,8 @@ export async function parseRatingAllocate(
   const $ = cheerio.load(resp.data);
   const title =
     normalizeText($("h1, h2").first().text()) || `RatingAllocate ${cmid}`;
+  const hasKnownRatingAllocateMarkup =
+    $(".choicestatustable, .choicesummarytable, #mod_ratingallocateshowoptions").length > 0;
 
   const content: RatingAllocateContent = {};
 
@@ -95,7 +103,7 @@ export async function parseRatingAllocate(
     const label = normalizeText($(cells[0]).text()).toLowerCase();
     const valueCell = $(cells[1]);
 
-    if (label === "your rating") {
+    if (CHOICES_LABELS.has(label)) {
       // Choices aus ul > li extrahieren. Ein li kann Rating-Angabe am Ende haben,
       // z.B. "W09 (Freitag, 14-16) (4 - Highly appreciated)".
       const items: RatingChoice[] = [];
@@ -105,7 +113,7 @@ export async function parseRatingAllocate(
         const { title: itemTitle, rating } = splitChoiceLine(raw);
         items.push({
           title: truncate(itemTitle, 200),
-          user_rating: rating,
+          user_rating: label === "your rating" ? rating : undefined,
         });
       });
       if (items.length > 0) content.choices = items;
@@ -120,12 +128,44 @@ export async function parseRatingAllocate(
     }
   });
 
+  const optionsTableChoices = parseOptionsTable($);
+  if (optionsTableChoices.length > 0) {
+    content.choices = optionsTableChoices;
+  }
+
   const hasAnything = Object.keys(content).length > 0;
+  if (!hasAnything && !hasKnownRatingAllocateMarkup) {
+    throw new LearnwebParseError(
+      "ratingallocate",
+      ".choicestatustable",
+      "No ratingallocate status table or options table found."
+    );
+  }
+
   return {
     title,
     content,
     parser_degraded: hasAnything ? undefined : true,
   };
+}
+
+function parseOptionsTable($: cheerio.CheerioAPI): RatingChoice[] {
+  const choices: RatingChoice[] = [];
+  $("#mod_ratingallocateshowoptions tbody tr, table.ratingallocate_choices_table tbody tr").each((_, tr) => {
+    const cells = $(tr).find("td");
+    if (cells.length < 1) return;
+    const title = normalizeText($(cells[0]).text());
+    if (!title) return;
+    const description = cells.length > 1 ? normalizeText($(cells[1]).text()) : "";
+    const rawMaxSize = cells.length > 2 ? normalizeText($(cells[2]).text()) : "";
+    const maxSize = rawMaxSize ? Number.parseInt(rawMaxSize, 10) : Number.NaN;
+    choices.push({
+      title: truncate(title, 200),
+      description: description ? truncate(description, 1000) : undefined,
+      max_size: Number.isFinite(maxSize) ? maxSize : undefined,
+    });
+  });
+  return choices;
 }
 
 /**

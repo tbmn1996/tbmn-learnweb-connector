@@ -384,6 +384,32 @@ test("parseRatingAllocate: deadline + choices[] + allocation", async () => {
   assert.ok(result.content.allocation?.startsWith("W09"));
 });
 
+test("parseRatingAllocate: Rateable Choices werden ohne user_rating ausgegeben", async () => {
+  const session = fakeSession({
+    "/mod/ratingallocate/view.php?id=7002": `
+      <html><body>
+        <h1>Gruppenwahl</h1>
+        <div class="choicestatustable">
+          <div class="choicesummarytable">
+            <table>
+              <tr>
+                <td>Rateable Choices</td>
+                <td><ul><li>W01 Montag 10-12</li><li>W02 Dienstag 12-14</li></ul></td>
+              </tr>
+            </table>
+          </div>
+        </div>
+      </body></html>
+    `,
+  });
+  const result = await parseRatingAllocate(session, 7002);
+
+  assert.equal(result.title, "Gruppenwahl");
+  assert.equal(result.content.choices.length, 2);
+  assert.equal(result.content.choices[0].title, "W01 Montag 10-12");
+  assert.equal(result.content.choices[0].user_rating, undefined);
+});
+
 // ------------------------------------------------------------------
 // parseTimeline
 // ------------------------------------------------------------------
@@ -414,6 +440,19 @@ test("parseTimeline: extrahiert Events + modtype + cmid + Sortierung (via _extra
   for (let i = 1; i < timestamps.length; i++) {
     assert.ok(timestamps[i] >= timestamps[i - 1], "Events nicht chronologisch sortiert");
   }
+});
+
+test("parseTimeline: extrahiert Events aus block_calendar_upcoming", () => {
+  const events = extractTimelineEvents(
+    readFixture("timeline-calendar-block.html"),
+    BASE_URL
+  );
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].title, "Event A");
+  assert.equal(events[0].modtype, "assign");
+  assert.equal(events[0].cmid, 4101);
+  assert.ok(events[0].url.endsWith("/mod/assign/view.php?id=4101"));
 });
 
 test("parseTimeline: liefert Events aus gültiger upcoming-Fixture", async () => {

@@ -81,7 +81,6 @@ export async function buildDiagnostics(
     http_status: resp.status,
     url: resp.url,
     timestamp: new Date().toISOString(),
-    body_snippet: String(resp.data).slice(0, 2048),
     has_moodle_cookie: await session.hasMoodleCookie(),
     selector_hits: {
       [containerSelector]: containerEl.length,
@@ -132,6 +131,21 @@ function logMissingCalendarEventDate(event: TimelineEvent): void {
   );
 }
 
+function logTimelineDegraded(
+  $: cheerio.CheerioAPI,
+  htmlLength: number,
+  ajaxAttempted: boolean
+): void {
+  console.error("[timeline-degraded] " + JSON.stringify({
+    html_len: htmlLength,
+    sel_event_list_item: $('li[data-region="event-list-item"]').length,
+    sel_event_item: $('li[data-region="event-item"]').length,
+    sel_calendar_block: $(".block_calendar_upcoming").length,
+    sel_mod_links: $("a[href*='/mod/']").length,
+    ajax_attempted: ajaxAttempted,
+  }));
+}
+
 // --- parseTimeline ---
 
 export async function parseTimeline(
@@ -165,20 +179,18 @@ export async function parseTimeline(
   }
 
   if (events.length === 0) {
+    events = extractCalendarBlock($, baseUrl);
+  }
+
+  if (events.length === 0) {
     // HTML liefert keine Events — Moodle 4.x rendert sie per JavaScript
     // (Container kann vorhanden-aber-leer ODER komplett absent sein).
     // Immer AJAX als primäre Quelle fragen.
     events = await extractViaCalendarAjax(session, window_days);
 
     if (events.length === 0) {
-      // Wenn AJAX auch nichts liefert: Diagnostics loggen und [] zurückgeben.
-      // (Kann legitim leer sein, oder AJAX-Response-Format hat sich geändert.)
-      const diagnostics = await buildDiagnostics(session, $, resp, UPCOMING_CONTAINER, {
-        container_present: $(UPCOMING_CONTAINER).length,
-        "event-list-item": $('li[data-region="event-list-item"]').length,
-        "event-item": $('li[data-region="event-item"]').length,
-      });
-      console.error(JSON.stringify({ event: "timeline_ajax_empty", ...diagnostics }));
+      // Kann legitim leer sein. Wir loggen nur Strukturmetriken, niemals HTML.
+      logTimelineDegraded($, resp.data.length, true);
       return { content: { events: [], window_days, fetched_at } };
     }
   }
@@ -427,6 +439,48 @@ function extractCalendarMonthEvents(
 }
 
 /**
+ * Extrahiert Aktivitätslinks aus dem Calendar-Upcoming-Block.
+ * Dieser Block taucht auf manchen Moodle-Seiten auf, wenn die klassische
+ * Upcoming-Liste nicht serverseitig gerendert wird.
+ */
+function extractCalendarBlock(
+  $: cheerio.CheerioAPI,
+  baseUrl: string
+): TimelineEvent[] {
+  const events: TimelineEvent[] = [];
+
+  $(".block_calendar_upcoming li a[href*='/mod/']").each((_, a) => {
+    const $a = $(a);
+    const href = $a.attr("href");
+    const title = normalizeText($a.text());
+    if (!href || !title) return;
+
+    const event: TimelineEvent = {
+      title: truncate(title, 300),
+      url: absoluteUrl(baseUrl, href),
+    };
+    const cmid = cmidFromUrl(href);
+    if (cmid) event.cmid = cmid;
+    const modMatch = href.match(/\/mod\/([a-z_]+)\//);
+    if (modMatch) event.modtype = modMatch[1];
+    const courseId = courseIdFromUrl(href);
+    if (courseId) event.course_id = courseId;
+
+    const containerText = normalizeText($a.closest("li").text());
+    const dateText = normalizeText(containerText.replace(title, ""));
+    if (dateText) {
+      event.due_at = truncate(dateText, 200);
+      const parsed = parseMoodleDate(dateText);
+      if (parsed) event.due_at_unix = Math.floor(parsed.getTime() / 1000);
+    }
+
+    events.push(event);
+  });
+
+  return events;
+}
+
+/**
  * Extrahiert Events aus der Monatsansicht (/calendar/view.php?view=month).
  * Selector: [data-region="day"] a[data-action="view-event"]
  */
@@ -558,13 +612,14 @@ async function extractViaCalendarAjax(
       http_status: resp.status,
       content_type: resp.headers["content-type"],
       body_length: resp.data?.length,
-      body_snippet: String(resp.data ?? "").slice(0, 500),
       ...extra,
     });
 
   if (resp.status < 200 || resp.status >= 300) {
     console.error(logCtx({ stage: "non_2xx" }));
     throw new LearnwebUpstreamError(
+      resp.status,
+      "/lib/ajax/service.php",
       `Moodle AJAX service returned ${resp.status}.`,
       { http_status: resp.status, url: resp.url, timestamp: new Date().toISOString() }
     );
@@ -575,14 +630,20 @@ async function extractViaCalendarAjax(
     parsed = JSON.parse(resp.data);
   } catch {
     console.error(logCtx({ stage: "invalid_json" }));
-    throw new LearnwebParseError("AJAX response is not valid JSON.", {
-      body_snippet: String(resp.data).slice(0, 500),
-    });
+    throw new LearnwebParseError(
+      "timeline",
+      "ajax:core_calendar_get_action_events_by_timesort",
+      "AJAX response is not valid JSON."
+    );
   }
 
   if (!Array.isArray(parsed) || !parsed[0]) {
     console.error(logCtx({ stage: "unexpected_shape", parsed_type: typeof parsed }));
-    throw new LearnwebParseError("AJAX response has unexpected shape.");
+    throw new LearnwebParseError(
+      "timeline",
+      "ajax:core_calendar_get_action_events_by_timesort",
+      "AJAX response has unexpected shape."
+    );
   }
 
   const result = parsed[0] as {
@@ -594,6 +655,8 @@ async function extractViaCalendarAjax(
   if (result.error || result.exception) {
     console.error(logCtx({ stage: "ajax_error", exception: result.exception }));
     throw new LearnwebParseError(
+      "timeline",
+      "ajax:core_calendar_get_action_events_by_timesort",
       `Moodle AJAX error: ${result.exception?.message ?? "unknown"}.`,
       { ajax_exception: result.exception }
     );
@@ -602,7 +665,11 @@ async function extractViaCalendarAjax(
   const rawEvents = result.data?.events;
   if (!Array.isArray(rawEvents)) {
     console.error(logCtx({ stage: "missing_events", result_keys: Object.keys(result) }));
-    throw new LearnwebParseError("AJAX response missing data.events array.");
+    throw new LearnwebParseError(
+      "timeline",
+      "ajax:core_calendar_get_action_events_by_timesort",
+      "AJAX response missing data.events array."
+    );
   }
 
   const baseUrl = session.getBaseUrl();
@@ -641,5 +708,6 @@ export function _extractForTest(html: string, baseUrl: string): TimelineEvent[] 
   const $ = cheerio.load(html);
   let events = extractEventItems($, baseUrl);
   if (events.length === 0) events = extractCalendarMonthEvents($, baseUrl);
+  if (events.length === 0) events = extractCalendarBlock($, baseUrl);
   return events;
 }
