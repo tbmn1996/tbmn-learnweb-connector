@@ -2,10 +2,9 @@
  * Parser für Moodle-Ressourcen (mod/resource = Dateien, die als Download
  * oder eingebettet dargestellt werden).
  *
- * WICHTIG: Wir laden die Datei niemals herunter. Stattdessen extrahieren wir
- * nur Metadaten + download_url, die der KI-Client bei Bedarf selbst aufrufen
- * kann. Das hält die MCP-Surface read-only und verhindert, dass große
- * Dateien im Tool-Response landen.
+ * WICHTIG: Der Parser lädt die Datei nicht herunter. Er extrahiert nur
+ * Metadaten + download_url; der optionale Dateiinhalt läuft über das separate
+ * Tool learnweb-download-resource mit Größenlimit.
  */
 
 import * as cheerio from "cheerio";
