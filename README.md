@@ -4,8 +4,8 @@ MCP-Server (Model Context Protocol) als **claude.ai Custom Connector** für das
 [Learnweb der Universität Münster](https://www.uni-muenster.de/LearnWeb/learnweb2)
 (Moodle-Installation der WWU).
 
-Liefert fünf Read-only-Tools, mit denen Claude auf Kurse, Kursstruktur,
-Aktivitäten und die persönliche Timeline zugreifen kann — ohne dass der Nutzer
+Liefert sieben Read-only-Tools, mit denen Claude auf Kurse, Kursstruktur,
+Aktivitäten, die persönliche Timeline und geschützte Dateien zugreifen kann — ohne dass der Nutzer
 manuell Inhalte copy-pasten muss.
 
 ## Tools
@@ -17,9 +17,13 @@ manuell Inhalte copy-pasten muss.
 | `learnweb-read-activity` | Liest eine Aktivität strukturiert aus (resource, url, page, forum, assign, quiz, ratingallocate, folder, workshop, lesson, choice, feedback). |
 | `learnweb-get-timeline` | Listet anstehende Aktivitäten (Deadlines, Quizze) kursübergreifend, sortiert nach Fälligkeit. |
 | `learnweb-search-courses` | Durchsucht den globalen Learnweb-Kurskatalog über `/course/search.php` und liefert paginierte Treffer. |
+| `learnweb-get-calendar-month` | Gibt Kalender-Events für einen bestimmten Monat zurück. |
+| `learnweb-download-resource` | Lädt eine authentifizierte `pluginfile.php`-Datei aus einer vorherigen `download_url` als MCP-Resource-Blob herunter. |
 
 Alle Tools sind **strikt read-only** — der Connector schreibt nichts ins Moodle.
-Dateien werden nie heruntergeladen, sondern nur als `download_url` zurückgegeben.
+Activity- und Folder-Parser liefern Datei-Links nur als `download_url`; Dateiinhalt
+wird nur explizit über `learnweb-download-resource` geladen. Standardlimit: 3 MB,
+opt-in Hard-Cap: 25 MB.
 
 ## Tool: `learnweb-search-courses`
 

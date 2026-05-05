@@ -7,12 +7,12 @@
  *   - Formular-Login mit logintoken (kein Moodle Web Service)
  *   - Cookie-persistenz über tough-cookie Jar
  *   - Transparente Re-Login-Logik bei Session-Expiry
+ *   - Authentifizierter Datei-Download via pluginfile.php (downloadFile)
  *   - Rate-Limiting: Inter-Call-Delay + Intra-Call-Semaphore
  *   - Absolut keine Credentials in Logs, Errors oder Responses
  *
  * Nicht zuständig für:
  *   - HTML-Parsing (siehe src/learnweb/parsers/*)
- *   - Datei-Download (wird bewusst nicht unterstützt)
  */
 
 import axios, { AxiosInstance, AxiosResponse } from "axios";
@@ -59,6 +59,13 @@ export class LearnwebTimeoutError extends Error {
   }
 }
 
+export class LearnwebFileTooLargeError extends Error {
+  constructor(message = "Downloaded file exceeds configured byte limit.") {
+    super(message);
+    this.name = "LearnwebFileTooLargeError";
+  }
+}
+
 export class LearnwebParseError extends Error {
   constructor(
     message = "Learnweb response could not be parsed.",
@@ -88,6 +95,13 @@ export interface LearnwebResponse {
   url: string;
   headers: Record<string, string>;
   data: string;
+}
+
+export interface DownloadFileResult {
+  status: number;
+  contentType: string;
+  filename?: string;
+  bytes: Buffer;
 }
 
 export class LearnwebSession {
@@ -238,6 +252,43 @@ export class LearnwebSession {
   }
 
   /**
+   * Authentifizierter Download einer Moodle-Datei.
+   * Nutzt dieselbe CookieJar wie `get()`, liefert aber Bytes statt HTML-Text.
+   */
+  public async downloadFile(
+    url: string,
+    options: { maxBytes?: number; timeoutMs?: number } = {}
+  ): Promise<DownloadFileResult> {
+    const maxBytes = options.maxBytes ?? 25 * 1024 * 1024;
+    const timeoutMs = options.timeoutMs ?? 60_000;
+
+    await this.throttleInterCall();
+    await this.acquireSemaphore();
+    try {
+      await this.ensureLoggedIn();
+      let resp = await this.rawDownload(url, maxBytes, timeoutMs);
+
+      if (this.isLoginRedirectDownload(resp)) {
+        await this.performLogin(/* force */ true);
+        resp = await this.rawDownload(url, maxBytes, timeoutMs);
+        if (this.isLoginRedirectDownload(resp)) {
+          throw new LearnwebAuthError("Session could not be re-established for download.");
+        }
+      }
+
+      if (resp.status < 200 || resp.status >= 300) {
+        throw new LearnwebUpstreamError("Download failed with non-2xx status.", {
+          status: resp.status,
+        });
+      }
+
+      return resp;
+    } finally {
+      this.releaseSemaphore();
+    }
+  }
+
+  /**
    * GET auf einen Pfad oder eine absolute Learnweb-URL.
    * - Führt automatisch einen Login aus, falls noch keine Session besteht.
    * - Erkennt Login-Redirects und logged bei Bedarf transparent neu.
@@ -305,6 +356,47 @@ export class LearnwebSession {
     } catch (error) {
       if (isAxiosTimeoutError(error)) {
         throw new LearnwebTimeoutError();
+      }
+      throw error;
+    }
+  }
+
+  /** Roher Datei-Download ohne Semaphore/Throttle — nur intern benutzen. */
+  private async rawDownload(
+    url: string,
+    maxBytes: number,
+    timeoutMs: number
+  ): Promise<DownloadFileResult> {
+    try {
+      const resp = await this.client.get(url, {
+        responseType: "arraybuffer",
+        timeout: timeoutMs,
+        maxContentLength: maxBytes,
+        maxBodyLength: maxBytes,
+        // Datei-Downloads dürfen Moodle-/Token-Redirects folgen; HTML-Parser
+        // bleiben bewusst bei maxRedirects:0, damit sie View-Seiten auswerten können.
+        maxRedirects: 5,
+        validateStatus: () => true,
+      });
+      const headers = normalizeHeaders(resp.headers);
+      const contentType = headers["content-type"] ?? "application/octet-stream";
+      const filename = extractFilenameFromContentDisposition(headers["content-disposition"]);
+      return {
+        status: resp.status,
+        contentType,
+        filename,
+        bytes: Buffer.from(resp.data as ArrayBuffer),
+      };
+    } catch (error) {
+      if (isAxiosTimeoutError(error)) {
+        throw new LearnwebTimeoutError();
+      }
+      if (
+        axios.isAxiosError(error) &&
+        error.code === "ERR_BAD_RESPONSE" &&
+        /maxContentLength size of .* exceeded/i.test(error.message)
+      ) {
+        throw new LearnwebFileTooLargeError();
       }
       throw error;
     }
@@ -408,6 +500,14 @@ export class LearnwebSession {
     return location.includes("/login/index.php") || location.includes("/login/?");
   }
 
+  private isLoginRedirectDownload(resp: DownloadFileResult): boolean {
+    if (!resp.contentType.toLowerCase().startsWith("text/html")) {
+      return false;
+    }
+    const head = resp.bytes.toString("utf8", 0, Math.min(resp.bytes.length, 8192));
+    return /<form[^>]+action=["'][^"']*\/login\/index\.php/i.test(head);
+  }
+
   /**
    * Blockiert, bis der letzte Inter-Call-Delay abgelaufen ist.
    */
@@ -464,4 +564,33 @@ function isAxiosTimeoutError(error: unknown): boolean {
     return false;
   }
   return error.code === "ECONNABORTED" || error.code === "ETIMEDOUT";
+}
+
+function extractFilenameFromContentDisposition(header?: string): string | undefined {
+  if (!header) return undefined;
+
+  const encodedMatch = /filename\*\s*=\s*(?:UTF-8'[^']*')?([^;\r\n]+)/i.exec(header);
+  if (encodedMatch) {
+    const encoded = stripContentDispositionQuotes(encodedMatch[1]);
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      return encoded;
+    }
+  }
+
+  const plainMatch = /filename\s*=\s*([^;\r\n]+)/i.exec(header);
+  if (!plainMatch) return undefined;
+  return stripContentDispositionQuotes(plainMatch[1]);
+}
+
+function stripContentDispositionQuotes(value: string): string {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
 }

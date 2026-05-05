@@ -1,13 +1,14 @@
 /**
  * MCP-Tools für Learnweb/Moodle — read-only.
  *
- * Sechs Tools:
+ * Sieben Tools:
  *   1. learnweb-get-courses          → alle Kurse des Users
  *   2. learnweb-get-course-overview  → Struktur eines Kurses
  *   3. learnweb-read-activity        → strukturierter Inhalt einer Aktivität
  *   4. learnweb-get-timeline         → anstehende Aktivitäten (Upcoming-View)
  *   5. learnweb-search-courses       → globale Kurssuche über /course/search.php
  *   6. learnweb-get-calendar-month   → Kalenderansicht für einen Monat
+ *   7. learnweb-download-resource    → authentifizierter Datei-Download
  *
  * Sicherheitsgrenze:
  *   Die Tools werden ausschliesslich registriert, wenn
@@ -27,6 +28,7 @@ import {
 } from "../config";
 import {
   LearnwebAuthError,
+  LearnwebFileTooLargeError,
   LearnwebNotConfiguredError,
   LearnwebParseError,
   LearnwebSession,
@@ -55,10 +57,14 @@ import {
   READ_ONLY_TOOL_ANNOTATIONS,
   ToolConfig,
   ToolInputSchema,
+  ToolOutputSchema,
   WorkspaceScope,
 } from "./shared";
 
 const MODTYPE_RE = /^[a-z_]+$/;
+const DEFAULT_DOWNLOAD_BYTES = 3 * 1024 * 1024;
+const MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
+const PLUGINFILE_PATH_RE = /^\/(?:webservice\/)?(?:token)?pluginfile\.php\//;
 const MAX_LIMIT = 25;
 const DEFAULT_LIMIT = 10;
 const SEARCH_DEFAULT_LIMIT = 25;
@@ -143,6 +149,34 @@ function buildSearchTimeoutResult() {
     structuredContent: payload,
     isError: true,
   });
+}
+
+function buildDownloadErrorResult(code: string, message: string) {
+  const payload = {
+    error: true as const,
+    code,
+    message,
+  };
+  return ok(payload, {
+    text: JSON.stringify(payload),
+    structuredContent: payload,
+    isError: true,
+  });
+}
+
+function relativePluginfilePath(target: URL, sessionBase: URL): string | null {
+  let path = target.pathname;
+  const basePath = sessionBase.pathname.replace(/\/+$/, "");
+
+  if (basePath && basePath !== "") {
+    const prefix = `${basePath}/`;
+    if (!path.startsWith(prefix)) {
+      return null;
+    }
+    path = path.slice(basePath.length);
+  }
+
+  return PLUGINFILE_PATH_RE.test(path) ? path : null;
 }
 
 /**
@@ -450,6 +484,104 @@ export function registerLearnwebTools(server: McpServer, scope?: WorkspaceScope)
       });
     }
   );
+
+  // ------------------------------------------------------------------
+  // Tool 7: learnweb-download-resource
+  // ------------------------------------------------------------------
+  registerTool(
+    "learnweb-download-resource",
+    {
+      title: "Learnweb: Download Resource",
+      description:
+        "Authenticated download of a Moodle pluginfile.php URL using the active Learnweb session. " +
+        "Use only with URLs from a prior learnweb-read-activity response (download_url field). " +
+        "Returns the file as MCP resource content (base64 blob + mime type). Default max 3 MB; hard cap 25 MB.",
+      inputSchema: {
+        url: z
+          .string()
+          .url()
+          .describe("Absolute Moodle pluginfile.php URL returned as download_url by learnweb-read-activity."),
+        max_bytes: z
+          .number()
+          .int()
+          .positive()
+          .max(MAX_DOWNLOAD_BYTES)
+          .optional()
+          .describe(`Optional upper byte limit. Default ${DEFAULT_DOWNLOAD_BYTES}, hard cap ${MAX_DOWNLOAD_BYTES}.`),
+      } as ToolInputSchema,
+      outputSchema: {
+        filename: z.string().optional(),
+        size: z.number().int().nonnegative(),
+        content_type: z.string(),
+      } as ToolOutputSchema,
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async (args: { url: string; max_bytes?: number }) => {
+      try {
+        const session = LearnwebSession.getInstance();
+        const sessionBase = new URL(session.getBaseUrl());
+        let target: URL;
+        try {
+          target = new URL(args.url);
+        } catch {
+          return buildDownloadErrorResult("invalid_url", "URL could not be parsed.");
+        }
+
+        if (target.protocol !== sessionBase.protocol) {
+          return buildDownloadErrorResult("invalid_url", "URL protocol does not match Learnweb base URL.");
+        }
+        if (target.host !== sessionBase.host) {
+          return buildDownloadErrorResult("invalid_url", "URL host does not match Learnweb base URL.");
+        }
+        if (!relativePluginfilePath(target, sessionBase)) {
+          return buildDownloadErrorResult("invalid_url", "URL must point to a Moodle pluginfile.php path below the Learnweb base URL.");
+        }
+
+        const maxBytes = args.max_bytes ?? DEFAULT_DOWNLOAD_BYTES;
+        const result = await session.downloadFile(args.url, { maxBytes });
+        const metadata = {
+          filename: result.filename,
+          size: result.bytes.length,
+          content_type: result.contentType,
+        };
+
+        return {
+          content: [
+            {
+              type: "resource" as const,
+              resource: {
+                uri: args.url,
+                mimeType: result.contentType,
+                blob: result.bytes.toString("base64"),
+              },
+            },
+            {
+              type: "text" as const,
+              text: JSON.stringify(metadata),
+            },
+          ],
+          structuredContent: metadata,
+        };
+      } catch (err) {
+        if (err instanceof LearnwebFileTooLargeError) {
+          return buildDownloadErrorResult("file_too_large", err.message);
+        }
+        if (err instanceof LearnwebNotConfiguredError) {
+          return buildDownloadErrorResult("learnweb_not_configured", "Learnweb is not configured on this server.");
+        }
+        if (err instanceof LearnwebAuthError) {
+          return buildDownloadErrorResult("learnweb_auth_error", "Learnweb authentication failed.");
+        }
+        if (err instanceof LearnwebTimeoutError) {
+          return buildDownloadErrorResult("learnweb_timeout", "Learnweb request timed out.");
+        }
+        if (err instanceof LearnwebUpstreamError) {
+          return buildDownloadErrorResult("learnweb_upstream_error", "Learnweb upstream returned an error.");
+        }
+        throw err;
+      }
+    }
+  );
 }
 
 /**
@@ -534,4 +666,9 @@ export const _testing = {
   resetSearchRateLimitForTests,
   analyzeCourseSearchHtml,
   buildSearchTimeoutResult,
+  buildDownloadErrorResult,
+  relativePluginfilePath,
+  DEFAULT_DOWNLOAD_BYTES,
+  MAX_DOWNLOAD_BYTES,
+  PLUGINFILE_PATH_RE,
 };

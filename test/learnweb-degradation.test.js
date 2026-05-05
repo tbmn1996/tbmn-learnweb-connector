@@ -190,7 +190,8 @@ const AJAX_VALID = JSON.parse(
   fs.readFileSync(path.join(FIXTURES, "ajax-calendar-upcoming-valid.json"), "utf8")
 );
 
-test("parseTimeline: Moodle-4.x-Skeleton (Container leer) → AJAX liefert Events", async () => {
+test("parseTimeline: Moodle-4.x-Skeleton (Container leer) → AJAX liefert Events", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-04-30T00:00:00Z") });
   const session = fakeSessionWithAjax({
     getHtml: readFixture("timeline-container-empty.html"),
     ajaxBody: AJAX_VALID,
