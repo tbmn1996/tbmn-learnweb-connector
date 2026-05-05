@@ -67,6 +67,7 @@ type OAuthManagerOptions = {
 
 type ResourceEntry = {
   metadataUrl: string;
+  resourceName: string;
   resourceUrl: URL;
   workspaceId: string;
 };
@@ -207,6 +208,7 @@ export class OAuthManager implements OAuthServerProvider {
       const resourceUrl = new URL(`/mcp/workspaces/${encodeURIComponent(workspaceId)}`, this.issuerUrl);
       const entry = {
         workspaceId,
+        resourceName: workspaceId,
         resourceUrl,
         metadataUrl: getOAuthProtectedResourceMetadataUrl(resourceUrl),
       };
@@ -239,7 +241,7 @@ export class OAuthManager implements OAuthServerProvider {
           resource: entry.resourceUrl.toString(),
           authorization_servers: [this.oauthMetadata.issuer],
           scopes_supported: [DEFAULT_SCOPE],
-          resource_name: `notion-workspace-${entry.workspaceId}`,
+          resource_name: entry.resourceName,
         })
       );
     }
@@ -260,12 +262,13 @@ export class OAuthManager implements OAuthServerProvider {
     });
   }
 
-  // Registriert eine generische OAuth-geschützte Ressource (kein Notion-Workspace).
+  // Registriert eine generische OAuth-geschützte Ressource.
   // Muss VOR mount() aufgerufen werden, damit der /.well-known-Endpoint eingehängt wird.
   registerGenericResource(resourceId: string, resourcePath: string): void {
     const resourceUrl = new URL(resourcePath, this.issuerUrl);
     const entry: ResourceEntry = {
       workspaceId: resourceId,
+      resourceName: resourceId,
       resourceUrl,
       metadataUrl: getOAuthProtectedResourceMetadataUrl(resourceUrl),
     };
