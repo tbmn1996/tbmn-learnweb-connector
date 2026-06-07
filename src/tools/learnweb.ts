@@ -1,10 +1,11 @@
 /**
  * MCP-Tools für Learnweb/Moodle — read-only.
  *
- * Sieben Tools:
+ * Tools:
  *   1. learnweb-get-courses          → alle Kurse des Users
  *   2. learnweb-get-course-overview  → Struktur eines Kurses
  *   3. learnweb-read-activity        → strukturierter Inhalt einer Aktivität
+ *  3b. learnweb-read-quiz-review     → Auswertung des EIGENEN, abgeschlossenen Versuchs
  *   4. learnweb-get-timeline         → anstehende Aktivitäten (Upcoming-View)
  *   5. learnweb-search-courses       → globale Kurssuche über /course/search.php
  *   6. learnweb-get-calendar-month   → Kalenderansicht für einen Monat
@@ -44,6 +45,7 @@ import { parseFallback } from "../learnweb/parsers/fallback";
 import { parseForum } from "../learnweb/parsers/forum";
 import { parseAssign } from "../learnweb/parsers/assign";
 import { parseQuiz } from "../learnweb/parsers/quiz";
+import { parseQuizReview } from "../learnweb/parsers/quizReview";
 import { parseRatingAllocate } from "../learnweb/parsers/ratingallocate";
 import { parseCalendarMonth, parseTimeline } from "../learnweb/parsers/timeline";
 import { parseFolder } from "../learnweb/parsers/folder";
@@ -309,6 +311,44 @@ export function registerLearnwebTools(server: McpServer, scope?: WorkspaceScope)
       return wrapHandler(async () => {
         const session = LearnwebSession.getInstance();
         return dispatchActivity(session, args);
+      });
+    }
+  );
+
+  // ------------------------------------------------------------------
+  // Tool 3b: learnweb-read-quiz-review
+  // Sanktionierte Ausnahme zur Quiz-Designgrenze (siehe parsers/quizReview.ts):
+  // liest NUR den eigenen, abgeschlossenen Versuch zur Fehleranalyse.
+  // ------------------------------------------------------------------
+  registerTool(
+    "learnweb-read-quiz-review",
+    {
+      title: "Learnweb: Read Quiz Attempt Review",
+      description:
+        "Read the per-question review of YOUR OWN finished quiz attempt (mod/quiz/review.php): " +
+        "question text, your answer, correct/incorrect, marks, the correct answer and the explanation. " +
+        "Only FINISHED attempts return question data; non-finished/unknown states return header only. " +
+        "'your_answer' is best-effort (multiple-choice, short-answer, numeric, select); complex embedded " +
+        "types like Cloze/matching/drag&drop may omit it while still returning the correct answer. " +
+        "Use the attempt id and cmid from a review_url returned by learnweb-read-activity (modtype 'quiz').",
+      inputSchema: {
+        cmid: z
+          .number()
+          .int()
+          .positive()
+          .describe("Moodle course module id (cmid) of the quiz."),
+        attempt: z
+          .number()
+          .int()
+          .positive()
+          .describe("Moodle quiz attempt id (from the review_url of your own finished attempt)."),
+      } as ToolInputSchema,
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async (args: { cmid: number; attempt: number }) => {
+      return wrapHandler(async () => {
+        const session = LearnwebSession.getInstance();
+        return parseQuizReview(session, args.cmid, args.attempt);
       });
     }
   );

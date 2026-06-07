@@ -6,6 +6,12 @@
  * das wäre akademisch problematisch und eine deutliche Ausweitung der
  * MCP-Surface.
  *
+ * AUSNAHME: Das Auslesen des EIGENEN, abgeschlossenen Versuchs (Fragen,
+ * eigene Antwort, Musterlösung) zur persönlichen Fehleranalyse ist bewusst
+ * in einen separaten Parser ausgelagert (parsers/quizReview.ts) und nur über
+ * das explizite Tool learnweb-read-quiz-review erreichbar. Diese Infoseite
+ * hier bleibt davon unberührt.
+ *
  * Struktur (Moodle 4.x, siehe test/fixtures/learnweb/quiz.html):
  *   div.activity-header  → Opens/Closes
  *   div.activity-description → Beschreibung

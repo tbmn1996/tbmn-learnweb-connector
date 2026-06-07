@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<!--
+  Synthetische Fixture: Moodle-Quiz-REVIEW (/mod/quiz/review.php?attempt=...&cmid=...).
+  Bildet die Moodle-4.x-Struktur der Versuchs-Auswertung (eigener, abgeschlossener
+  Versuch) ab. Inhalte sind erfunden, KEINE echten PII/Antworten.
+
+  Struktur:
+    table.quizreviewsummary  → Kopf mit State / Started / Completed / Time taken /
+                               Marks / Grade  (je <tr><th>Label</th><td>Wert</td></tr>)
+    div.que.<state>          → eine Frage; state-Klasse: correct | incorrect |
+                               partiallycorrect | notanswered
+      div.info  → h3.no (Question N), div.state (Text), div.grade (Mark x out of y)
+      div.content
+        div.formulation .qtext            → Fragetext
+        div.formulation .answer .rN       → Antwortoptionen; gewaehlte hat
+                                            <input ... checked>; korrekte hat Klasse .correct
+        div.outcome .feedback
+          div.specificfeedback            → Rueckmeldung zur eigenen Antwort (RICHTIG!/FALSCH!)
+          div.rightanswer                 → "The correct answer is: ..."
+          div.generalfeedback             → allgemeine Erklaerung
+-->
+<html lang="de">
+<head><title>Kapitel 1.2 — Versuchsueberpruefung</title></head>
+<body>
+
+<div role="main">
+  <h1>Kapitel 1.2 — Versuchsueberpruefung</h1>
+
+  <table class="quizreviewsummary">
+    <tbody>
+      <tr><th class="cell" scope="row">Started on</th><td class="cell">Tuesday, 5 May 2026, 2:14 PM</td></tr>
+      <tr><th class="cell" scope="row">State</th><td class="cell">Finished</td></tr>
+      <tr><th class="cell" scope="row">Completed on</th><td class="cell">Tuesday, 5 May 2026, 2:41 PM</td></tr>
+      <tr><th class="cell" scope="row">Time taken</th><td class="cell">26 mins 48 secs</td></tr>
+      <tr><th class="cell" scope="row">Marks</th><td class="cell">7.00/12.00</td></tr>
+      <tr><th class="cell" scope="row">Grade</th><td class="cell"><b>7.00</b> out of 12.00 (<b>58.33</b>%)</td></tr>
+    </tbody>
+  </table>
+
+  <!-- Frage 1: korrekt beantwortet -->
+  <div id="question-1" class="que multichoice deferredfeedback correct">
+    <div class="info">
+      <h3 class="no">Question <span class="qno">1</span></h3>
+      <div class="state">Correct</div>
+      <div class="grade">Mark 1.00 out of 1.00</div>
+    </div>
+    <div class="content">
+      <div class="formulation clearfix">
+        <h4 class="accesshide">Question text</h4>
+        <div class="qtext"><p>Was bezeichnet der Begriff "Conversion Rate" im Online-Marketing?</p></div>
+        <div class="ablock">
+          <div class="prompt">Waehlen Sie eine Antwort:</div>
+          <div class="answer">
+            <div class="r0 correct">
+              <input type="radio" name="q1" value="0" checked disabled>
+              <div class="flex-fill"><p>Anteil der Besucher, die eine gewuenschte Aktion ausfuehren</p></div>
+              <i class="icon fa fa-check text-success"></i>
+            </div>
+            <div class="r1">
+              <input type="radio" name="q1" value="1" disabled>
+              <div class="flex-fill"><p>Gesamtzahl der Seitenaufrufe pro Tag</p></div>
+            </div>
+            <div class="r2">
+              <input type="radio" name="q1" value="2" disabled>
+              <div class="flex-fill"><p>Durchschnittliche Verweildauer auf der Seite</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="outcome clearfix">
+        <h4 class="accesshide">Feedback</h4>
+        <div class="feedback">
+          <div class="specificfeedback">RICHTIG! Die Conversion Rate misst genau diesen Anteil.</div>
+          <div class="rightanswer">The correct answer is: Anteil der Besucher, die eine gewuenschte Aktion ausfuehren</div>
+          <div class="generalfeedback"><p>Die Conversion Rate ist eine zentrale Kennzahl und wird als Verhaeltnis von Conversions zu Gesamtbesuchern berechnet.</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Frage 2: falsch beantwortet -->
+  <div id="question-2" class="que multichoice deferredfeedback incorrect">
+    <div class="info">
+      <h3 class="no">Question <span class="qno">2</span></h3>
+      <div class="state">Incorrect</div>
+      <div class="grade">Mark 0.00 out of 1.00</div>
+    </div>
+    <div class="content">
+      <div class="formulation clearfix">
+        <h4 class="accesshide">Question text</h4>
+        <div class="qtext"><p>Welche Kennzahl beschreibt die Kosten pro gewonnenem Neukunden?</p></div>
+        <div class="ablock">
+          <div class="prompt">Waehlen Sie eine Antwort:</div>
+          <div class="answer">
+            <div class="r0">
+              <input type="radio" name="q2" value="0" disabled>
+              <div class="flex-fill"><p>Customer Acquisition Cost (CAC)</p></div>
+              <i class="icon fa fa-check text-success"></i>
+            </div>
+            <div class="r1 incorrect">
+              <input type="radio" name="q2" value="1" checked disabled>
+              <div class="flex-fill"><p>Customer Lifetime Value (CLV)</p></div>
+              <i class="icon fa fa-remove text-danger"></i>
+            </div>
+            <div class="r2">
+              <input type="radio" name="q2" value="2" disabled>
+              <div class="flex-fill"><p>Return on Investment (ROI)</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="outcome clearfix">
+        <h4 class="accesshide">Feedback</h4>
+        <div class="feedback">
+          <div class="specificfeedback">FALSCH! Der CLV beschreibt den Gesamtwert eines Kunden, nicht die Akquisekosten.</div>
+          <div class="rightanswer">The correct answer is: Customer Acquisition Cost (CAC)</div>
+          <div class="generalfeedback"><p>Der CAC ergibt sich aus den gesamten Marketing- und Vertriebskosten geteilt durch die Zahl der gewonnenen Neukunden.</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Frage 3: teilweise korrekt (Mehrfachauswahl) -->
+  <div id="question-3" class="que multichoice deferredfeedback partiallycorrect">
+    <div class="info">
+      <h3 class="no">Question <span class="qno">3</span></h3>
+      <div class="state">Partially correct</div>
+      <div class="grade">Mark 0.50 out of 1.00</div>
+    </div>
+    <div class="content">
+      <div class="formulation clearfix">
+        <h4 class="accesshide">Question text</h4>
+        <div class="qtext"><p>Welche der folgenden Kanaele zaehlen zum Performance-Marketing? (Mehrfachauswahl)</p></div>
+        <div class="ablock">
+          <div class="prompt">Waehlen Sie eine oder mehrere Antworten:</div>
+          <div class="answer">
+            <div class="r0 correct">
+              <input type="checkbox" name="q3a" value="0" checked disabled>
+              <div class="flex-fill"><p>Search Engine Advertising (SEA)</p></div>
+            </div>
+            <div class="r1">
+              <input type="checkbox" name="q3b" value="1" disabled>
+              <div class="flex-fill"><p>Affiliate-Marketing</p></div>
+            </div>
+            <div class="r2 incorrect">
+              <input type="checkbox" name="q3c" value="2" checked disabled>
+              <div class="flex-fill"><p>Klassische Print-Anzeige</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="outcome clearfix">
+        <h4 class="accesshide">Feedback</h4>
+        <div class="feedback">
+          <div class="specificfeedback">Teilweise richtig: SEA stimmt, die Print-Anzeige zaehlt nicht dazu.</div>
+          <div class="rightanswer">The correct answers are: Search Engine Advertising (SEA), Affiliate-Marketing</div>
+          <div class="generalfeedback"><p>Performance-Marketing umfasst messbare, erfolgsbasierte Online-Kanaele.</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Frage 4: Cloze/multianswer — KEIN sauberes .qtext, nur .formulation.
+       Testet den Fallback inkl. Entfernen des .accesshide-Labels. -->
+  <div id="question-4" class="que multianswer immediatefeedback partiallycorrect">
+    <div class="info">
+      <h3 class="no">Question <span class="qno">4</span></h3>
+      <div class="state">Partially correct</div>
+      <div class="grade">Mark 1.50 out of 3.00</div>
+    </div>
+    <div class="content">
+      <div class="formulation clearfix">
+        <h4 class="accesshide">Question text</h4>
+        <p>Ordnen Sie die Kennzahlen zu: Die Eigenkapitalquote betraegt
+          <span class="subquestion">25%</span> und der Verschuldungsgrad
+          <span class="subquestion">300%</span>.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

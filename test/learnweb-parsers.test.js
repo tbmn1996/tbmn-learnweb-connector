@@ -29,6 +29,7 @@ const { parseFallback } = require(path.join(ROOT, "dist/learnweb/parsers/fallbac
 const { parseForum } = require(path.join(ROOT, "dist/learnweb/parsers/forum"));
 const { parseAssign } = require(path.join(ROOT, "dist/learnweb/parsers/assign"));
 const { parseQuiz } = require(path.join(ROOT, "dist/learnweb/parsers/quiz"));
+const { parseQuizReview } = require(path.join(ROOT, "dist/learnweb/parsers/quizReview"));
 const { parseRatingAllocate } = require(path.join(ROOT, "dist/learnweb/parsers/ratingallocate"));
 const { parseTimeline, parseCalendarMonth, _extractForTest: extractTimelineEvents } = require(path.join(ROOT, "dist/learnweb/parsers/timeline"));
 const { LearnwebParseError } = require(path.join(ROOT, "dist/learnweb/session"));
@@ -295,6 +296,67 @@ test("parseAssign: mappt submissionstatustable + deadline", async () => {
   assert.equal(result.content.grading_status, "Not graded");
   assert.equal(result.content.time_remaining, "3 days 9 hours remaining");
   assert.ok(result.content.description?.includes("PDF"));
+});
+
+// ------------------------------------------------------------------
+// parseQuizReview
+// ------------------------------------------------------------------
+test("parseQuizReview: Header + Fragen inkl. eigener Antwort + Musterlösung", async () => {
+  // Pfad-Key muss byte-genau dem entsprechen, was der Parser baut
+  // (attempt VOR cmid) — fakeSession matcht per exaktem String.
+  const session = fakeSession({
+    "/mod/quiz/review.php?attempt=2683241&cmid=3970766": readFixture("quiz-review.html"),
+  });
+  const result = await parseQuizReview(session, 3970766, 2683241);
+
+  // Kopf-Tabelle.
+  assert.ok(result.title.includes("Kapitel 1.2"));
+  assert.equal(result.header.state, "Finished");
+  assert.equal(result.header.marks, "7.00/12.00");
+  assert.ok(result.header.grade?.includes("58.33"));
+  assert.equal(result.questions.length, 4);
+  assert.equal(result.parser_degraded, undefined);
+
+  // Frage 1: korrekt.
+  const q1 = result.questions[0];
+  assert.equal(q1.number, 1);
+  assert.equal(q1.state, "Correct");
+  assert.equal(q1.is_correct, true);
+  assert.ok(q1.your_answer?.some((a) => a.includes("Anteil der Besucher")));
+  assert.ok(q1.correct_answer?.includes("Anteil der Besucher"));
+  assert.ok(q1.correct_answer && !/^The correct answer/i.test(q1.correct_answer));
+
+  // Frage 2: falsch — Musterlösung weicht von eigener Antwort ab.
+  const q2 = result.questions[1];
+  assert.equal(q2.is_correct, false);
+  assert.ok(q2.your_answer?.some((a) => a.includes("Customer Lifetime Value")));
+  assert.ok(q2.correct_answer?.includes("Customer Acquisition Cost"));
+  assert.ok(q2.specific_feedback?.includes("FALSCH"));
+
+  // Frage 3: teilweise korrekt, Mehrfachauswahl → zwei eigene Antworten.
+  const q3 = result.questions[2];
+  assert.equal(q3.is_correct, false);
+  assert.equal(q3.your_answer?.length, 2);
+
+  // Frage 4: Cloze/multianswer ohne sauberes .qtext → .formulation-Fallback,
+  // dabei wird das unsichtbare "Question text"-Label (.accesshide) entfernt.
+  const q4 = result.questions[3];
+  assert.ok(q4.question_text?.includes("Ordnen Sie die Kennzahlen"));
+  assert.ok(!/^Question text/i.test(q4.question_text));
+});
+
+test("parseQuizReview: nicht abgeschlossener Versuch liefert keine Fragen/Lösungen", async () => {
+  // Vertrags-Guard: Bei nicht-finished Status werden trotz vorhandener
+  // Fragenblöcke KEINE Fragen/Antworten ausgeliefert.
+  const html = readFixture("quiz-review.html").replace("Finished", "In progress");
+  const session = fakeSession({
+    "/mod/quiz/review.php?attempt=1&cmid=2": html,
+  });
+  const result = await parseQuizReview(session, 2, 1);
+
+  assert.equal(result.header.state, "In progress");
+  assert.equal(result.questions.length, 0);
+  assert.equal(result.parser_degraded, true);
 });
 
 // ------------------------------------------------------------------
