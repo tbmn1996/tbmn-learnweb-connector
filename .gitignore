@@ -11,3 +11,12 @@ logs/
 # Tests nutzen stattdessen die synthetischen Fixtures daneben.
 test/fixtures/learnweb/_live/
 test/fixtures/learnweb/raw/
+
+# Transkriptions-Artefakte: Mediendateien + Transkripte enthalten Kursinhalte/PII
+# und gehören nie ins Git. Whisper-Modelle sind groß und werden lokal geladen.
+transcripts/
+.cache/
+models/
+*.wav
+*.mp4
+cookies.txt

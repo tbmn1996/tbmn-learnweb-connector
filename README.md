@@ -140,6 +140,48 @@ npm test
 Parser- und Validation-Tests laufen gegen HTML-Fixtures in
 [`test/fixtures/learnweb/`](test/fixtures/learnweb/). Keine Netzwerkaufrufe.
 
+## Aufzeichnungen transkribieren (lokal)
+
+Zusätzlich zum MCP-Server gibt es ein lokales Werkzeug, das Vorlesungs-/
+Tutorienaufzeichnungen (Opencast-„eLectures" sowie mp4/mp3-Dateien) aus den eigenen
+Kursen herunterlädt, **lokal** mit whisper.cpp transkribiert und als Markdown unter
+`transcripts/` ablegt. Inkrementell über `transcripts/manifest.json`.
+
+Setup (einmalig): `brew install whisper-cpp ffmpeg yt-dlp`, ein ggml-Modell nach
+`models/` laden (Default `models/ggml-large-v3-turbo.bin`) und die Credentials per
+`npm run keychain:bootstrap` hinterlegen.
+
+```bash
+# Erst ansehen, was verarbeitet würde:
+scripts/with-keychain-env.sh npx tsx scripts/transcribe-recordings.ts --dry-run
+# Einen Kurs / begrenzt verarbeiten:
+scripts/with-keychain-env.sh npx tsx scripts/transcribe-recordings.ts --course <id> --limit 1
+# Alle Kurse:
+scripts/with-keychain-env.sh npx tsx scripts/transcribe-recordings.ts
+```
+
+Flags: `--course <id>`, `--limit <n>`, `--dry-run`, `--model <pfad>`,
+`--language <code>` (Default `de`), `--keep-video`, `--scan-all-files`. Die
+zugehörige Engine liegt in [`src/transcription/`](src/transcription/) +
+[`src/learnweb/parsers/recordings.ts`](src/learnweb/parsers/recordings.ts) und ist
+über `npm test` mitgetestet. Mediendateien und Transkripte sind gitignored.
+
+### Grafische Oberfläche (Web-UI)
+
+Alle Funktionen sind auch über eine lokale Web-App bedienbar — Setup (Zugangsdaten
+in die Keychain, Whisper-Modell herunterladen), Aufzeichnungen durchsuchen und
+einzeln/kursweise/komplett auswählen, Transkription mit Live-Fortschritt und das
+Ansehen der fertigen Transkripte:
+
+```bash
+npm run ui          # baut das Frontend, startet 127.0.0.1:4317, öffnet den Browser
+npm run ui:dev      # Backend + Vite-Dev-Server (Hot-Reload) für die Entwicklung
+```
+
+Die App läuft rein lokal (nur 127.0.0.1, kein Auth). Backend: Express in
+[`src/webapp/`](src/webapp/) (REST + SSE), Frontend: React/Vite in
+[`webapp/`](webapp/).
+
 ## Architektur
 
 ```

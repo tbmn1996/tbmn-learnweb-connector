@@ -12,6 +12,8 @@
     "codex:mcp:register": "bash ./scripts/register-codex-mcp.sh",
     "start": "node dist/mcp-server.js",
     "start:http": "MCP_TRANSPORT=http node dist/mcp-server.js",
+    "ui": "tsx scripts/webapp.ts",
+    "ui:dev": "tsx scripts/webapp.ts --dev",
     "test": "npm run build && node --test test/**/*.test.js"
   },
   "engines": {
