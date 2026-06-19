@@ -1,6 +1,6 @@
 /**
  * Dünner Wrapper um child_process.spawn für externe CLIs (yt-dlp, ffmpeg,
- * ffprobe, whisper-cli). Als injizierbarer `CommandRunner` gestaltet, damit
+ * ffprobe, uvx/mlx_whisper, whisper-cli). Als injizierbarer `CommandRunner` gestaltet, damit
  * Downloader/Transcriber in Tests ohne echte Prozesse geprüft werden können.
  */
 

@@ -27,7 +27,7 @@ export function App() {
     <div className="app">
       <header className="app-head">
         <h1>Learnweb Transkription</h1>
-        <span className="sub">lokal · whisper.cpp · Uni Münster</span>
+        <span className="sub">lokal · MLX Whisper / whisper.cpp · Uni Münster</span>
       </header>
 
       <nav className="tabs">

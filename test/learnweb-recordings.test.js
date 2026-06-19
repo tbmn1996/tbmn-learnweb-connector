@@ -69,6 +69,14 @@ test("parseOpencastEpisode: extrahiert JSON-escaped mp4-URLs + Dauer", () => {
   assert.equal(durationSeconds, 2166);
 });
 
+test("parseOpencastEpisode: erkennt direkte window.episode-Metadaten", () => {
+  const parsed = parseOpencastEpisode(readFixture("opencast-direct-episode.html"));
+  assert.equal(parsed.mp4Urls.length, 1);
+  assert.equal(parsed.episodeId, "28308471-10a0-444b-b5c3-d5572f570161");
+  assert.equal(parsed.title, "Rechnungswesen SoSe 2026 (BWL2) - Vorlesung 1");
+  assert.equal(parsed.durationSeconds, 7977);
+});
+
 // ── extractRecordings ──────────────────────────────────────────────────────
 test("extractRecordings (opencast): eine Quelle je Episode, ele-cdn, kein Auth", async () => {
   const session = fakeSession({
@@ -83,6 +91,24 @@ test("extractRecordings (opencast): eine Quelle je Episode, ele-cdn, kein Auth",
   assert.equal(sources[0].episodeId, "04d797da-9f60-4a3d-9a97-690d75014983");
   assert.equal(sources[0].discriminator, "04d797da-9f60-4a3d-9a97-690d75014983");
   assert.equal(sources[0].durationSeconds, 2166);
+  assert.match(sources[0].mediaUrl, /ele-cdn.*concat\.mp4$/);
+});
+
+test("extractRecordings (opencast): direkte Episode ohne &e=-Liste", async () => {
+  const session = fakeSession({
+    "/mod/opencast/view.php?id=4076395": readFixture("opencast-direct-episode.html"),
+  });
+  const sources = await extractRecordings(session, {
+    cmid: 4076395,
+    modtype: "opencast",
+    name: "Rechnungswesen SoSe 2026 (BWL2) - Vorlesung 1",
+    url: "",
+  });
+  assert.equal(sources.length, 1);
+  assert.equal(sources[0].episodeId, "28308471-10a0-444b-b5c3-d5572f570161");
+  assert.equal(sources[0].discriminator, "28308471-10a0-444b-b5c3-d5572f570161");
+  assert.equal(sources[0].durationSeconds, 7977);
+  assert.equal(sources[0].needsAuth, false);
   assert.match(sources[0].mediaUrl, /ele-cdn.*concat\.mp4$/);
 });
 

@@ -1,8 +1,9 @@
 // API-Client + Typen für das lokale Transkriptions-Backend.
 
 export interface SetupStatus {
-  tools: { whisper: boolean; ytdlp: boolean; ffmpeg: boolean };
+  tools: { mlx: boolean; whisper: boolean; ytdlp: boolean; ffmpeg: boolean };
   models: {
+    mlx: { model: string; cached: boolean };
     dir: string;
     installed: { file: string; sizeMb: number }[];
     available: { name: string; file: string; sizeMb: number; note: string }[];
@@ -46,7 +47,7 @@ export interface JobState {
   cancelled: boolean;
   activeIndex: number;
   items: JobItem[];
-  options: { model: string; language: string; keepVideo: boolean };
+  options: { backend: "mlx" | "whisper.cpp"; model: string; language: string; keepVideo: boolean };
 }
 
 export interface ManifestEntry {

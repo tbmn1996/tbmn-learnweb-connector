@@ -64,7 +64,8 @@ export function StatusView({ model }: { model: ModelEvent | null }) {
       <div className="card">
         <h2>Werkzeuge</h2>
         <ul className="checklist">
-          <ToolLine ok={t.whisper} label="whisper-cli (whisper.cpp)" hint="brew install whisper-cpp" />
+          <ToolLine ok={t.mlx} label="MLX Whisper (bevorzugt)" hint="uvx oder gecachtes MLX-Modell fehlt" />
+          <ToolLine ok={t.whisper} label="whisper-cli (Fallback)" hint="optional: brew install whisper-cpp" />
           <ToolLine ok={t.ytdlp} label="yt-dlp" hint="brew install yt-dlp" />
           <ToolLine ok={t.ffmpeg} label="ffmpeg" hint="brew install ffmpeg" />
         </ul>
@@ -72,25 +73,32 @@ export function StatusView({ model }: { model: ModelEvent | null }) {
 
       <div className="card">
         <h2>Whisper-Modell</h2>
-        {status.models.installed.length > 0 ? (
+        {t.mlx && status.models.mlx.cached ? (
+          <p className="small">
+            <span className="badge ok">MLX aktiv</span>{" "}
+            Das vorhandene Modell <code>{status.models.mlx.model}</code> wird automatisch verwendet.
+          </p>
+        ) : status.models.installed.length > 0 ? (
           <p className="small">
             Installiert: {status.models.installed.map((m) => `${m.file} (${m.sizeMb} MB)`).join(", ")}
           </p>
         ) : (
           <p className="small muted">Noch kein Modell installiert.</p>
         )}
-        <div className="row">
-          <select value={dlModel} onChange={(e) => setDlModel(e.target.value)} style={{ maxWidth: 320 }}>
-            {status.models.available.map((m) => (
-              <option key={m.name} value={m.name}>
-                {m.name} — {m.sizeMb} MB · {m.note}
-              </option>
-            ))}
-          </select>
-          <button className="btn" disabled={modelBusy} onClick={() => void api.downloadModel(dlModel)}>
-            Herunterladen
-          </button>
-        </div>
+        {!t.mlx && (
+          <div className="row">
+            <select value={dlModel} onChange={(e) => setDlModel(e.target.value)} style={{ maxWidth: 320 }}>
+              {status.models.available.map((m) => (
+                <option key={m.name} value={m.name}>
+                  {m.name} — {m.sizeMb} MB · {m.note}
+                </option>
+              ))}
+            </select>
+            <button className="btn" disabled={modelBusy} onClick={() => void api.downloadModel(dlModel)}>
+              Herunterladen
+            </button>
+          </div>
+        )}
         {modelBusy && (
           <div style={{ marginTop: 12 }}>
             <div className="small muted">

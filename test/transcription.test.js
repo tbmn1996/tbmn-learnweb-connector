@@ -13,7 +13,7 @@ const {
   isDone,
   putEntry,
 } = require(path.join(ROOT, "dist/transcription/manifest"));
-const { parseWhisperJson, extractAudio, transcribeWav } = require(
+const { parseWhisperJson, parseMlxWhisperJson, extractAudio, transcribeWav } = require(
   path.join(ROOT, "dist/transcription/transcriber")
 );
 const { downloadWithYtDlp } = require(path.join(ROOT, "dist/transcription/downloader"));
@@ -116,6 +116,21 @@ test("parseWhisperJson: extrahiert Offsets/Text, filtert Leeres", () => {
   assert.deepEqual(parseWhisperJson(null), []);
 });
 
+test("parseMlxWhisperJson: konvertiert Sekunden in Millisekunden", () => {
+  const segs = parseMlxWhisperJson({
+    segments: [
+      { start: 0, end: 1.25, text: " Hallo " },
+      { start: 1.25, end: 2, text: "  " },
+      { start: 2, end: 3.004, text: "Welt" },
+    ],
+  });
+  assert.deepEqual(segs, [
+    { fromMs: 0, toMs: 1250, text: "Hallo" },
+    { fromMs: 2000, toMs: 3004, text: "Welt" },
+  ]);
+  assert.deepEqual(parseMlxWhisperJson({}), []);
+});
+
 test("extractAudio: ruft ffmpeg mit 16kHz-mono-PCM-Args", async () => {
   const calls = [];
   const fakeRun = async (file, args) => {
@@ -145,12 +160,49 @@ test("transcribeWav: ruft whisper-cli und parst die JSON-Ausgabe", async () => {
     calls.push({ file, args });
     return { code: 0, stdout: "", stderr: "" };
   };
-  const segs = await transcribeWav(wav, { model: "/m.bin", language: "de" }, fakeRun);
+  const segs = await transcribeWav(wav, { backend: "whisper.cpp", model: "/m.bin", language: "de" }, fakeRun);
 
   assert.equal(calls[0].file, "whisper-cli");
   assert.ok(calls[0].args.includes("-oj"));
   assert.ok(calls[0].args.includes("de"));
   assert.deepEqual(segs, [{ fromMs: 0, toMs: 1000, text: "Test" }]);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("transcribeWav: nutzt vorhandenes MLX-Modell über uvx", async () => {
+  const dir = await tmpDir();
+  const wav = path.join(dir, "audio.wav");
+  fs.writeFileSync(wav, "fake");
+  fs.writeFileSync(
+    path.join(dir, "audio.json"),
+    JSON.stringify({ segments: [{ start: 0.5, end: 1.5, text: "MLX Test" }] })
+  );
+
+  const calls = [];
+  const progress = [];
+  const fakeRun = async (file, args, opts) => {
+    calls.push({ file, args });
+    opts.onProgress(" 40%|████      | 20/50");
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  const segs = await transcribeWav(
+    wav,
+    {
+      backend: "mlx",
+      model: "mlx-community/whisper-large-v3-turbo",
+      language: "auto",
+      onProgress: (pct) => progress.push(pct),
+    },
+    fakeRun
+  );
+
+  assert.equal(calls[0].file, "uvx");
+  assert.deepEqual(calls[0].args.slice(0, 3), ["--from", "mlx-whisper", "mlx_whisper"]);
+  assert.ok(calls[0].args.includes("mlx-community/whisper-large-v3-turbo"));
+  assert.ok(!calls[0].args.includes("--language"));
+  assert.deepEqual(progress, [40]);
+  assert.deepEqual(segs, [{ fromMs: 500, toMs: 1500, text: "MLX Test" }]);
 
   fs.rmSync(dir, { recursive: true, force: true });
 });

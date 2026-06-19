@@ -34,6 +34,7 @@ export interface JobItem {
 }
 
 export interface JobOptions {
+  backend: "mlx" | "whisper.cpp";
   model: string;
   language: string;
   keepVideo: boolean;
@@ -121,6 +122,7 @@ export class JobManager extends EventEmitter {
 
         try {
           const result = await processRecording(session, rec, {
+            backend: job.options.backend,
             model: job.options.model,
             language: job.options.language,
             keepVideo: job.options.keepVideo,

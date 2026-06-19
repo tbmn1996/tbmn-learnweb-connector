@@ -14,8 +14,10 @@ import { readFile } from "node:fs/promises";
 import { LearnwebSession } from "../learnweb/session";
 import {
   AVAILABLE_MODELS,
+  MLX_MODEL,
   checkSetup,
   downloadModel,
+  isMlxWhisperReady,
   modelPath,
   readCredentials,
   writeCredentials,
@@ -180,12 +182,16 @@ export function createApp() {
         res.status(400).json({ error: "Keine passenden Aufzeichnungen ausgewählt." });
         return;
       }
-      const model = body.options?.model ? modelPath(body.options.model) : DEFAULT_MODEL;
-      if (!existsSync(model)) {
+      const requestedModel = body.options?.model as string | undefined;
+      const useMlx = !requestedModel && (await isMlxWhisperReady());
+      const backend = useMlx ? "mlx" : "whisper.cpp";
+      const model = useMlx ? MLX_MODEL : requestedModel ? modelPath(requestedModel) : DEFAULT_MODEL;
+      if (backend === "whisper.cpp" && !existsSync(model)) {
         res.status(400).json({ error: `Modell fehlt: ${path.basename(model)}. Bitte unter Setup herunterladen.` });
         return;
       }
       const job = jobs.start(s, selected, {
+        backend,
         model,
         language: body.options?.language || "de",
         keepVideo: Boolean(body.options?.keepVideo),

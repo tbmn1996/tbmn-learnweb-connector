@@ -1,9 +1,10 @@
 /**
- * Audio-Extraktion (ffmpeg) + lokale Transkription (whisper.cpp / whisper-cli).
+ * Audio-Extraktion (ffmpeg) + lokale Transkription (MLX Whisper oder whisper.cpp).
  * Alle Prozessaufrufe laufen über den injizierbaren CommandRunner → testbar.
  */
 
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { ensureSuccess, runCommand, type CommandRunner } from "./run";
 import type { TranscriptSegment } from "./markdown";
 
@@ -11,7 +12,9 @@ const FFMPEG_TIMEOUT_MS = 30 * 60 * 1000; // 30 min — Extraktion ist schnell, 
 const WHISPER_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 h — lange Vorlesungen + großes Modell.
 
 export interface TranscribeOptions {
-  /** Pfad zum ggml-Modell (z. B. models/ggml-large-v3-turbo.bin). */
+  /** Zu verwendendes lokales Whisper-Backend. */
+  backend: "mlx" | "whisper.cpp";
+  /** Hugging-Face-Modellname (MLX) oder Pfad zum ggml-Modell (whisper.cpp). */
   model: string;
   /** Sprachcode für Whisper. Default "de". */
   language?: string;
@@ -85,6 +88,22 @@ export function parseWhisperJson(json: unknown): TranscriptSegment[] {
     .filter((s) => s.text.length > 0);
 }
 
+/** Wandelt MLX-Whisper-JSON in dasselbe Segmentformat wie whisper.cpp um. */
+export function parseMlxWhisperJson(json: unknown): TranscriptSegment[] {
+  const segments = json && typeof json === "object" ? (json as { segments?: unknown }).segments : undefined;
+  if (!Array.isArray(segments)) return [];
+  return segments
+    .map((raw): TranscriptSegment => {
+      const seg = (raw ?? {}) as { start?: unknown; end?: unknown; text?: unknown };
+      return {
+        fromMs: typeof seg.start === "number" ? Math.round(seg.start * 1000) : 0,
+        toMs: typeof seg.end === "number" ? Math.round(seg.end * 1000) : 0,
+        text: String(seg.text ?? "").trim(),
+      };
+    })
+    .filter((s) => s.text.length > 0);
+}
+
 /** Baut aus whisper-cli-Ausgabe (`[hh:mm:ss.xxx --> ...]`) einen %-Fortschritt. */
 function makeWhisperProgressHandler(
   durationSeconds: number,
@@ -101,9 +120,20 @@ function makeWhisperProgressHandler(
   };
 }
 
+/** MLX Whisper meldet den Fortschritt über tqdm als Prozentwert. */
+function makeMlxProgressHandler(onProgress: (pct: number) => void): (chunk: string) => void {
+  return (chunk: string) => {
+    let lastPct = -1;
+    for (const match of chunk.matchAll(/(?:^|\s)(\d{1,3})%\|/g)) {
+      lastPct = Number(match[1]);
+    }
+    if (lastPct >= 0) onProgress(Math.min(100, lastPct));
+  };
+}
+
 /**
- * Transkribiert eine WAV-Datei mit whisper-cli und liefert Segmente.
- * whisper-cli schreibt das JSON nach `<wav ohne .wav>.json` (-oj/-of).
+ * Transkribiert eine WAV-Datei mit dem gewählten Backend und liefert Segmente.
+ * Beide Backends schreiben das JSON nach `<wav ohne .wav>.json`.
  */
 export async function transcribeWav(
   wavPath: string,
@@ -111,6 +141,37 @@ export async function transcribeWav(
   run: CommandRunner = runCommand
 ): Promise<TranscriptSegment[]> {
   const outPrefix = wavPath.replace(/\.wav$/i, "");
+  if (opts.backend === "mlx") {
+    const args = [
+      "--from",
+      "mlx-whisper",
+      "mlx_whisper",
+      wavPath,
+      "--model",
+      opts.model,
+      "--output-dir",
+      path.dirname(outPrefix),
+      "--output-name",
+      path.basename(outPrefix),
+      "--output-format",
+      "json",
+      "--verbose",
+      opts.onProgress ? "True" : "False",
+    ];
+    if (opts.language && opts.language !== "auto") args.push("--language", opts.language);
+
+    ensureSuccess(
+      "mlx_whisper",
+      await run("uvx", args, {
+        timeoutMs: WHISPER_TIMEOUT_MS,
+        onProgress: opts.onProgress ? makeMlxProgressHandler(opts.onProgress) : undefined,
+        signal: opts.signal,
+      })
+    );
+    const json = JSON.parse(await readFile(`${outPrefix}.json`, "utf8")) as unknown;
+    return parseMlxWhisperJson(json);
+  }
+
   const args = ["-m", opts.model, "-l", opts.language ?? "de", "-f", wavPath, "-oj", "-of", outPrefix];
   // Ohne Live-Fortschritt unterdrücken wir die Prints (-np). Mit onProgress
   // brauchen wir die Segment-Zeilen für die %-Berechnung.

@@ -45,6 +45,7 @@ export interface ProcessEvent {
 }
 
 export interface ProcessOptions {
+  backend: "mlx" | "whisper.cpp";
   model: string;
   language: string;
   keepVideo: boolean;
@@ -161,6 +162,7 @@ export async function processRecording(
 
   opts.onEvent?.({ phase: "transcribe", pct: 0 });
   const segments = await transcribeWav(wavPath, {
+    backend: opts.backend,
     model: opts.model,
     language: opts.language,
     durationSeconds,

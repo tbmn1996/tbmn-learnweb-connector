@@ -1,6 +1,6 @@
 /**
  * CLI-Orchestrator: dünner Wrapper um src/transcription/pipeline.ts.
- * Findet Aufzeichnungen, transkribiert sie lokal mit whisper.cpp und legt
+ * Findet Aufzeichnungen, transkribiert sie lokal mit MLX Whisper oder whisper.cpp und legt
  * Markdown ab. Inkrementell über transcripts/manifest.json.
  *
  * Aufruf (Credentials via Keychain-Wrapper):
@@ -10,7 +10,7 @@
  *   --course <id>      nur diesen Kurs (sonst: alle eingeschriebenen Kurse)
  *   --limit <n>        höchstens n neue Aufzeichnungen verarbeiten
  *   --dry-run          nur auflisten, was verarbeitet würde
- *   --model <pfad>     whisper.cpp-Modell (Default: models/ggml-large-v3-turbo.bin)
+ *   --model <pfad>     erzwingt ein lokales whisper.cpp-Modell
  *   --language <code>  Whisper-Sprache (Default: de)
  *   --keep-video       heruntergeladene Mediendatei nicht löschen
  *   --scan-all-files   auch resource/folder ohne Aufzeichnungs-Namen prüfen
@@ -29,6 +29,7 @@ import {
   type ProcessEvent,
 } from "../src/transcription/pipeline";
 import { isDone, loadManifest, putEntry, saveManifest, type Manifest } from "../src/transcription/manifest";
+import { isMlxWhisperReady, MLX_MODEL } from "../src/transcription/setup";
 
 interface Args {
   course?: number;
@@ -61,15 +62,17 @@ function logEvent(ev: ProcessEvent): void {
   switch (ev.phase) {
     case "download": if (ev.pct === undefined) console.log("  ↓ Download"); break;
     case "audio": console.log("  ♫ Audio extrahieren"); break;
-    case "transcribe": if (ev.pct === 0) console.log("  ✎ Transkribieren (whisper.cpp)"); break;
+    case "transcribe": if (ev.pct === 0) console.log("  ✎ Transkribieren"); break;
     case "markdown": break;
   }
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const model = args.model ?? DEFAULT_MODEL;
-  if (!existsSync(model)) {
+  const useMlx = !args.model && (await isMlxWhisperReady());
+  const backend = useMlx ? "mlx" : "whisper.cpp";
+  const model = useMlx ? MLX_MODEL : args.model ?? DEFAULT_MODEL;
+  if (backend === "whisper.cpp" && !existsSync(model)) {
     console.error(
       `Whisper-Modell nicht gefunden: ${model}\n` +
         `Bitte 'brew install whisper-cpp' und ein ggml-Modell nach models/ laden ` +
@@ -107,6 +110,7 @@ async function main() {
     console.log(`\n▶ ${rec.courseName} — ${rec.source.title}`);
     try {
       const result = await processRecording(session, rec, {
+        backend,
         model,
         language: args.language,
         keepVideo: args.keepVideo,

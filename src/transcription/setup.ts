@@ -7,8 +7,9 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { createWriteStream, existsSync, statSync } from "node:fs";
+import { createWriteStream, existsSync, readdirSync, statSync } from "node:fs";
 import { mkdir, rename, rm } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import https from "node:https";
 
@@ -17,6 +18,21 @@ const SECURITY_BIN = "/usr/bin/security";
 const KEYCHAIN_SERVICE = process.env.LEARNWEB_KEYCHAIN_SERVICE || "tbmn-learnweb-connector";
 export const MODELS_DIR = path.resolve("models");
 const HF_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+export const MLX_MODEL = "mlx-community/whisper-large-v3-turbo";
+
+function mlxModelCacheDir(): string {
+  const hfHome = process.env.HF_HOME || path.join(homedir(), ".cache", "huggingface");
+  return path.join(hfHome, "hub", `models--${MLX_MODEL.replace("/", "--")}`, "snapshots");
+}
+
+export function isMlxModelCached(): boolean {
+  const snapshots = mlxModelCacheDir();
+  try {
+    return existsSync(snapshots) && readdirSync(snapshots).length > 0;
+  } catch {
+    return false;
+  }
+}
 
 export interface ModelInfo {
   name: string;
@@ -68,13 +84,23 @@ async function keychainRead(account: string): Promise<string | null> {
 }
 
 export interface SetupStatus {
-  tools: { whisper: boolean; ytdlp: boolean; ffmpeg: boolean };
-  models: { dir: string; installed: { file: string; sizeMb: number }[]; available: ModelInfo[] };
+  tools: { mlx: boolean; whisper: boolean; ytdlp: boolean; ffmpeg: boolean };
+  models: {
+    mlx: { model: string; cached: boolean };
+    dir: string;
+    installed: { file: string; sizeMb: number }[];
+    available: ModelInfo[];
+  };
   credentials: { present: boolean };
 }
 
+export async function isMlxWhisperReady(): Promise<boolean> {
+  return isMlxModelCached() && (await which("uvx"));
+}
+
 export async function checkSetup(): Promise<SetupStatus> {
-  const [whisper, ytdlp, ffmpeg, hasUrl, hasUser, hasPass] = await Promise.all([
+  const [mlx, whisper, ytdlp, ffmpeg, hasUrl, hasUser, hasPass] = await Promise.all([
+    isMlxWhisperReady(),
     which("whisper-cli"),
     which("yt-dlp"),
     which("ffmpeg"),
@@ -92,8 +118,8 @@ export async function checkSetup(): Promise<SetupStatus> {
   }
 
   return {
-    tools: { whisper, ytdlp, ffmpeg },
-    models: { dir: MODELS_DIR, installed, available: AVAILABLE_MODELS },
+    tools: { mlx, whisper, ytdlp, ffmpeg },
+    models: { mlx: { model: MLX_MODEL, cached: isMlxModelCached() }, dir: MODELS_DIR, installed, available: AVAILABLE_MODELS },
     credentials: { present: hasUrl && hasUser && hasPass },
   };
 }

@@ -99,7 +99,10 @@ export function parseOpencastList(html: string, baseUrl: string): OpencastEpisod
 export function parseOpencastEpisode(html: string): {
   mp4Urls: string[];
   durationSeconds?: number;
+  episodeId?: string;
+  title?: string;
 } {
+  const episodeScope = html.match(/window\.episode\s*=\s*(\{[\s\S]*?\});/)?.[1] ?? html;
   const mp4Urls: string[] = [];
   const seen = new Set<string>();
   for (const m of html.matchAll(/https?:\\?\/\\?\/[^\s"'<>]+?\.mp4/gi)) {
@@ -109,9 +112,24 @@ export function parseOpencastEpisode(html: string): {
       mp4Urls.push(url);
     }
   }
-  const durMatch = html.match(/"duration"\s*:\s*([0-9]+(?:\.[0-9]+)?)/);
+  const durMatch = episodeScope.match(/"duration"\s*:\s*([0-9]+(?:\.[0-9]+)?)/);
   const durationSeconds = durMatch ? Math.round(Number.parseFloat(durMatch[1])) : undefined;
-  return { mp4Urls, durationSeconds };
+  const idMatch = episodeScope.match(/"id"\s*:\s*"([0-9a-fA-F-]{36})"/);
+  const titleMatch = episodeScope.match(/"title"\s*:\s*"((?:\\.|[^"\\])*)"/);
+  let title: string | undefined;
+  if (titleMatch) {
+    try {
+      title = JSON.parse(`"${titleMatch[1]}"`) as string;
+    } catch {
+      title = titleMatch[1];
+    }
+  }
+  return {
+    mp4Urls,
+    durationSeconds,
+    episodeId: idMatch?.[1].toLowerCase(),
+    title: title ? normalizeText(title) : undefined,
+  };
 }
 
 async function extractOpencast(
@@ -122,6 +140,25 @@ async function extractOpencast(
   const listResp = await session.get(`/mod/opencast/view.php?id=${activity.cmid}`);
   if (listResp.status < 200 || listResp.status >= 300) return [];
 
+  // Neuere Learnweb-Kurse modellieren jede Opencast-Aktivität als einzelne
+  // Episode. Ihre Player-Daten stehen direkt als window.episode im HTML.
+  const directEpisode = parseOpencastEpisode(listResp.data);
+  if (directEpisode.mp4Urls.length > 0) {
+    return [
+      {
+        title: directEpisode.title || activity.name,
+        kind: "opencast",
+        mediaUrl: directEpisode.mp4Urls[0],
+        needsAuth: false,
+        discriminator: directEpisode.episodeId || directEpisode.mp4Urls[0],
+        episodeId: directEpisode.episodeId,
+        durationSeconds: directEpisode.durationSeconds,
+      },
+    ];
+  }
+
+  // Fallback für ältere Aktivitäten, die mehrere Episoden über &e=<uuid>
+  // innerhalb derselben Moodle-Aktivität auflisten.
   const episodes = parseOpencastList(listResp.data, baseUrl);
   const sources: RecordingSource[] = [];
   for (const ep of episodes) {
