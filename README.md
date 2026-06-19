@@ -4,7 +4,7 @@ MCP-Server (Model Context Protocol) als **claude.ai Custom Connector** für das
 [Learnweb der Universität Münster](https://www.uni-muenster.de/LearnWeb/learnweb2)
 (Moodle-Installation der WWU).
 
-Liefert sieben Read-only-Tools, mit denen Claude auf Kurse, Kursstruktur,
+Liefert acht Read-only-Tools, mit denen Claude auf Kurse, Kursstruktur,
 Aktivitäten, die persönliche Timeline und geschützte Dateien zugreifen kann — ohne dass der Nutzer
 manuell Inhalte copy-pasten muss.
 
@@ -17,13 +17,16 @@ manuell Inhalte copy-pasten muss.
 | `learnweb-read-activity` | Liest eine Aktivität strukturiert aus (resource, url, page, forum, assign, quiz, ratingallocate, folder, workshop, lesson, choice, feedback). |
 | `learnweb-get-timeline` | Listet anstehende Aktivitäten (Deadlines, Quizze) kursübergreifend, sortiert nach Fälligkeit. |
 | `learnweb-search-courses` | Durchsucht den globalen Learnweb-Kurskatalog über `/course/search.php` und liefert paginierte Treffer. |
+| `learnweb-get-page` | Gibt bereinigten Text einer SSO-geschützten Learnweb-Seite zurück. Nur Pfade unter `/mod`, `/course`, `/calendar`, `/my`, `/blocks`. |
 | `learnweb-get-calendar-month` | Gibt Kalender-Events für einen bestimmten Monat zurück. |
 | `learnweb-download-resource` | Lädt eine authentifizierte `pluginfile.php`-Datei aus einer vorherigen `download_url` als MCP-Resource-Blob herunter. |
 
 Alle Tools sind **strikt read-only** — der Connector schreibt nichts ins Moodle.
 Activity- und Folder-Parser liefern Datei-Links nur als `download_url`; Dateiinhalt
-wird nur explizit über `learnweb-download-resource` geladen. Standardlimit: 3 MB,
-opt-in Hard-Cap: 25 MB.
+wird nur explizit über `learnweb-download-resource` geladen (Standardlimit 3 MB,
+opt-in Hard-Cap 25 MB). `learnweb-get-page` deckt `/pluginfile.php/...` bewusst
+nicht ab — authentifizierte Datei-Downloads laufen ausschließlich über
+`learnweb-download-resource`.
 
 ## Tool: `learnweb-search-courses`
 
@@ -47,6 +50,36 @@ Limitations:
 - Das Tool hat ein in-memory Rate-Limit von 15 Aufrufen pro 30 Sekunden. Nach einem Railway-Redeploy startet dieser Zähler neu.
 - Für die Suche gilt intern ein längerer Request-Timeout von 30 Sekunden. Wenn Learnweb selbst zu langsam antwortet, liefert das Tool gezielt `learnweb_timeout` statt eines generischen `learnweb_error`.
 - Das Output-Format enthält bewusst **kein** `shortname`, weil Klammer-Inhalte im Suchergebnis semantisch nicht stabil genug sind.
+
+## Tool: `learnweb-get-page`
+
+Input:
+
+- `path` — Pflichtfeld, max. 500 Zeichen, muss unter `/mod`, `/course`,
+  `/calendar`, `/my` oder `/blocks` liegen.
+
+Beispiel:
+
+```json
+{
+  "path": "/mod/forum/view.php?id=123"
+}
+```
+
+Output:
+
+- `path` — der angefragte Pfad
+- `title` — erster Seitentitel aus `h1`/`h2` oder der Pfad als Fallback
+- `text` — bereinigter Haupttext ohne Navigation, Header, Footer und Scripts
+- `length` — Länge des ungekürzten bereinigten Texts
+- `fetched_at` — ISO-Zeitpunkt des Abrufs
+
+Sicherheit:
+
+- Der Pfad wird erst per Regex eingeschränkt und danach intern normalisiert.
+- `..` und `%2e`-Varianten werden vor dem Upstream-Call abgelehnt, damit die
+  SSO-Session nicht für Admin- oder Nutzerprofilbereiche missbraucht werden kann.
+- Query-Strings bleiben erhalten, werden aber nicht zur Pfadnormalisierung genutzt.
 
 ## Setup (lokal, stdio-Modus, bevorzugt via macOS-Keychain)
 
@@ -166,6 +199,10 @@ src/
 - Fehler-Responses enthalten **nie** Cookie- oder Credential-Details — der
   `wrapHandler`-Try/Catch in `tools/learnweb.ts` liefert immer generische
   Messages.
+- Fehler-Responses enthalten eine `request_id` und ein whitelisted `context`-Objekt
+  mit sicheren Feldern wie `parser`, `selector`, `status` oder `path`. Stacks,
+  Cookies, Credentials, Session-Daten, HTML und Response-Bodies werden nicht
+  ausgegeben.
 
 ## Historie
 

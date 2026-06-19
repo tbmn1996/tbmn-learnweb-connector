@@ -67,22 +67,66 @@ export class LearnwebFileTooLargeError extends Error {
 }
 
 export class LearnwebParseError extends Error {
+  public readonly parser?: string;
+  public readonly selector?: string;
+  public readonly diagnostics?: Record<string, unknown>;
+
+  constructor(message?: string, diagnostics?: Record<string, unknown>);
   constructor(
-    message = "Learnweb response could not be parsed.",
-    public readonly diagnostics?: Record<string, unknown>
+    parser: string,
+    selector: string,
+    message: string,
+    diagnostics?: Record<string, unknown>
+  );
+  constructor(
+    arg1 = "Learnweb response could not be parsed.",
+    arg2?: string | Record<string, unknown>,
+    arg3?: string,
+    arg4?: Record<string, unknown>
   ) {
+    const hasStructuredContext = typeof arg2 === "string";
+    const message = hasStructuredContext ? (arg3 ?? "Learnweb response could not be parsed.") : arg1;
     super(message);
     this.name = "LearnwebParseError";
+    if (hasStructuredContext) {
+      this.parser = arg1;
+      this.selector = arg2;
+      this.diagnostics = arg4;
+    } else {
+      this.diagnostics = arg2 as Record<string, unknown> | undefined;
+    }
   }
 }
 
 export class LearnwebUpstreamError extends Error {
+  public readonly status?: number;
+  public readonly path?: string;
+  public readonly diagnostics?: Record<string, unknown>;
+
+  constructor(message?: string, diagnostics?: Record<string, unknown>);
   constructor(
-    message = "Learnweb upstream returned non-2xx.",
-    public readonly diagnostics?: Record<string, unknown>
+    status: number,
+    path: string,
+    message: string,
+    diagnostics?: Record<string, unknown>
+  );
+  constructor(
+    arg1: string | number = "Learnweb upstream returned non-2xx.",
+    arg2?: string | Record<string, unknown>,
+    arg3?: string,
+    arg4?: Record<string, unknown>
   ) {
+    const hasStructuredContext = typeof arg1 === "number";
+    const message = hasStructuredContext ? (arg3 ?? "Learnweb upstream returned non-2xx.") : String(arg1);
     super(message);
     this.name = "LearnwebUpstreamError";
+    if (hasStructuredContext) {
+      this.status = arg1;
+      this.path = typeof arg2 === "string" ? arg2 : undefined;
+      this.diagnostics = arg4;
+    } else {
+      this.diagnostics = arg2 as Record<string, unknown> | undefined;
+    }
   }
 }
 
