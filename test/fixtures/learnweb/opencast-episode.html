@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<!--
+  Synthetische Fixture: Opencast-Episode-Detailseite (/mod/opencast/view.php?id=99&e=<uuid>).
+  Die mp4-Streams stehen JSON-escaped (https:\/\/…) im eingebetteten Paella-Player-Config
+  (amd.init). Zwei Tracks (Renditions) mit identischem Audio.
+-->
+<html lang="de"><body>
+<iframe src="player.html" id="player-iframe" class="mod-opencast-paella-player" allowfullscreen></iframe>
+<script>
+require(['mod_opencast/opencast_player'], function(amd) {
+  amd.init({"title":"Vorlesung 1 — Einführung","duration":2166.08,"streams":[
+    {"src":"https:\/\/ele-cdn.example.com\/static\/mh_default_org\/api\/04d797da-9f60-4a3d-9a97-690d75014983\/029ff80d-03a1-46d1-b927-bd295ee29e7d\/concat.mp4"},
+    {"src":"https:\/\/ele-cdn.example.com\/static\/mh_default_org\/api\/04d797da-9f60-4a3d-9a97-690d75014983\/6b7c4c8e-7c3d-423f-b7fa-7087347f0f5f\/concat.mp4"}
+  ]});
+});
+</script>
+</body></html>

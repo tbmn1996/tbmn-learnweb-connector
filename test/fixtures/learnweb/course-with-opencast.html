@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<!--
+  Synthetische Fixture: Moodle-Kursseite (/course/view.php?id=<courseId>)
+  mit Opencast-Aktivitäten. Struktur wie in overview.ts beschrieben:
+    li.course-section > ul[data-for="cmlist"] > li[data-for="cmitem"]
+
+  Testet discoverCourseRecordings():
+    - 2x modtype_opencast (cmid 501, 502) — im Test bekommt eine davon eine
+      erfolgreiche Antwort, die andere lässt session.get() werfen, um den
+      parser_degraded-Pfad zu prüfen.
+    - 1x modtype_resource (cmid 503) — darf NICHT als Opencast erfasst werden.
+-->
+<html lang="de">
+<head><title>BWL2 Rechnungswesen: Kursseite</title></head>
+<body>
+<h1>BWL2 Rechnungswesen</h1>
+<section id="region-main">
+  <li class="section course-section" data-sectionname="Vorlesungen">
+    <h3>Vorlesungen</h3>
+    <ul data-for="cmlist">
+
+      <li data-for="cmitem" data-id="501" class="activity opencast modtype_opencast">
+        <div data-activityname="Vorlesung 1">
+          <a class="aalink" href="/mod/opencast/view.php?id=501">Öffnen</a>
+        </div>
+      </li>
+
+      <li data-for="cmitem" data-id="502" class="activity opencast modtype_opencast">
+        <div data-activityname="Vorlesung 2">
+          <a class="aalink" href="/mod/opencast/view.php?id=502">Öffnen</a>
+        </div>
+      </li>
+
+      <li data-for="cmitem" data-id="503" class="activity resource modtype_resource">
+        <div data-activityname="Skript Kapitel 1">
+          <a class="aalink" href="/mod/resource/view.php?id=503">Öffnen</a>
+        </div>
+      </li>
+
+    </ul>
+  </li>
+</section>
+</body>
+</html>

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<!--
+  Synthetische Fixture: mod_opencast Episodenliste (/mod/opencast/view.php?id=99).
+  Bildet die echte Struktur der Uni-Münster-eLectures nach:
+    - Tabelle mit einer Zeile je Episode
+    - Episode-Link mit &e=<uuid>, Episodentitel als Linktext
+    - Dauer-Zelle (c1)
+    - zusätzliche Lang-Switch-Links (de/en) auf dieselbe Episode → müssen dedupliziert werden
+-->
+<html lang="de"><body>
+<h2>eLectures Videos</h2>
+<table class="generaltable mod-opencast-series-list-view">
+  <tbody>
+    <tr>
+      <td class="cell c0"><a href="https://learnweb.example.com/mod/opencast/view.php?id=99&amp;e=04d797da-9f60-4a3d-9a97-690d75014983">Vorlesung 1 — Einführung</a></td>
+      <td class="cell c1">1:50:00</td>
+    </tr>
+    <tr>
+      <td class="cell c0"><a href="https://learnweb.example.com/mod/opencast/view.php?id=99&amp;e=443e9f31-481f-4ce8-88a3-ec456d1c0847">Vorlesung 2 — Grundlagen</a></td>
+      <td class="cell c1">45:30</td>
+    </tr>
+  </tbody>
+</table>
+<a href="https://learnweb.example.com/mod/opencast/view.php?id=99&amp;e=04d797da-9f60-4a3d-9a97-690d75014983&amp;lang=de">de</a>
+<a href="https://learnweb.example.com/mod/opencast/view.php?id=99&amp;e=04d797da-9f60-4a3d-9a97-690d75014983&amp;lang=en">en</a>
+</body></html>

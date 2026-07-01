@@ -11,6 +11,7 @@
  *   6. learnweb-get-page             → bereinigter Text einer SSO-geschützten Seite
  *   7. learnweb-get-calendar-month   → Kalenderansicht für einen Monat
  *   8. learnweb-download-resource    → authentifizierter Datei-Download
+ *   9. learnweb-list-recordings      → Opencast-Vorlesungsaufzeichnungen eines Kurses (Metadaten)
  *
  * Sicherheitsgrenze:
  *   Die Tools werden ausschliesslich registriert, wenn
@@ -41,6 +42,7 @@ import {
 } from "../learnweb/session";
 import { parseCourses } from "../learnweb/parsers/courses";
 import { parseCourseOverview } from "../learnweb/parsers/overview";
+import { discoverCourseRecordings } from "../learnweb/parsers/recordings";
 import { parseResource } from "../learnweb/parsers/resource";
 import { parseUrl } from "../learnweb/parsers/url";
 import { parsePage } from "../learnweb/parsers/page";
@@ -697,6 +699,34 @@ export function registerLearnwebTools(server: McpServer, scope?: WorkspaceScope)
         }
         throw err;
       }
+    }
+  );
+
+  // ------------------------------------------------------------------
+  // Tool 9: learnweb-list-recordings
+  // ------------------------------------------------------------------
+  registerTool(
+    "learnweb-list-recordings",
+    {
+      title: "Learnweb: List Recordings",
+      description:
+        "List Opencast lecture recordings (mod_opencast activities) found in a Learnweb course. " +
+        "Metadata only (title, cmid, episode_id, mp4 URL, recording date if known) — no binary content. " +
+        "Use scripts/download-recordings.ts locally to actually download the video files.",
+      inputSchema: {
+        course_id: z
+          .number()
+          .int()
+          .positive()
+          .describe("Numeric Moodle course id (id param from /course/view.php)."),
+      } as ToolInputSchema,
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async ({ course_id }: { course_id: number }) => {
+      return wrapHandler(async () => {
+        const session = LearnwebSession.getInstance();
+        return discoverCourseRecordings(session, course_id);
+      });
     }
   );
 }
